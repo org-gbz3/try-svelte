@@ -5,9 +5,8 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  # これを追加することで手動実行が可能になります
-  workflow_dispatch: {} 
+  workflow_dispatch: {}
 
 jobs:
   analyze:
-    # ... (以下、既存の設定)
+    # ...（既存のjob設定が続く）
