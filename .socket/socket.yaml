@@ -1,0 +1,13 @@
+# .socket/socket.yaml の例
+version: 2
+project: "try-svelte"
+# PR時のチェック設定
+pullRequestAlerts: true
+# 特定のIssueタイプでPRを失敗（ブロック）させる設定
+issueRules:
+  # 例: 重大な脆弱性がある場合にPRを「Fail」させる
+  criticalSecurityAdvisory:
+    action: fail
+  # 例: メンテナンスされていないパッケージの警告
+  unmaintained:
+    action: warn
