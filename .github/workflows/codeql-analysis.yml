@@ -5,9 +5,28 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  # これを追加することで手動実行が可能になります
-  workflow_dispatch: {} 
+  workflow_dispatch: {}
 
 jobs:
   analyze:
-    # ... (以下、既存の設定)
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: javascript-typescript # 使用言語に合わせて変更してください
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v3
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
