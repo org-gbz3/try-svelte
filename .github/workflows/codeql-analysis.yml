@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # actions/checkout@v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@68bde559dea0fdcac2102bfdf6230c5f70eb485e  # github/codeql-action/init@v4.35.4
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938  # github/codeql-action/init@v4.37.9
         with:
           languages: javascript-typescript # 使用言語に合わせて変更してください
 
