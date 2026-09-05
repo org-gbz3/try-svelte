@@ -29,6 +29,16 @@ dotnet publish backend -c Release
 
 `dotnet publish` 実行時に MSBuild ターゲットが `frontend` で `npm ci && npm run build` を実行し、
 ビルド成果物が自動的に `backend/wwwroot` に生成される。
+フロントエンドのビルドは .NET の静的ファイル収集より前に完了し、生成後のファイル一覧を収集対象に登録する。
+通常の `dotnet build` / `dotnet run` ではフロントエンドをビルドしない。
+`dotnet publish --no-build` はフロントエンドも再ビルドしないため、先に通常の `dotnet publish` を実行しておく。
+
+## CSP
+
+CSP は `frontend/vite.config.ts` で設定する。アプリ側のスタイルは CSS クラスに記載する。
+SvelteKit が生成する読み上げ通知要素（`svelte-announcer`）の固定インラインスタイルは、
+`style-src-attr` の `unsafe-hashes` と SHA-256 ハッシュで限定的に許可する。
+SvelteKit 更新時にこのスタイルが変わった場合は、実際のスタイル内容を確認してハッシュを更新する。
 
 ## DESINE.md
 

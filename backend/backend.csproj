@@ -11,21 +11,20 @@
   </ItemGroup>
 
   <!--
-    Build the SvelteKit SPA into wwwroot before publishing. This must run before
-    ComputeFilesToPublish: the static web assets glob over wwwroot is evaluated
-    before target execution, so files the frontend build produces are added
-    explicitly to ResolvedFileToPublish rather than relying on that glob.
+    静的ファイルの収集前に SPA を生成し、ハッシュ付きファイル名を確定させる。
+    NoBuild=true では既存のビルド成果物を使用する。
   -->
-  <Target Name="BuildFrontend" BeforeTargets="ComputeFilesToPublish">
+  <Target Name="BuildFrontend" BeforeTargets="ResolveProjectStaticWebAssets"
+          Condition="'$(_IsPublishing)' == 'true' and '$(NoBuild)' != 'true' and '$(DesignTimeBuild)' != 'true'">
     <Exec Command="npm ci" WorkingDirectory="../frontend" />
     <Exec Command="npm run build" WorkingDirectory="../frontend" />
 
     <ItemGroup>
-      <FrontendDist Include="wwwroot/**" />
-      <ResolvedFileToPublish Include="@(FrontendDist)">
-        <RelativePath>wwwroot/%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+      <!-- 評価時の古い一覧を置き換え、初回ビルドの生成物も収集対象にする。 -->
+      <Content Remove="@(Content)" Condition="$([System.String]::Copy('%(Content.Identity)').Replace('\', '/').StartsWith('wwwroot/'))" />
+      <Content Include="wwwroot/**">
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      </ResolvedFileToPublish>
+      </Content>
     </ItemGroup>
   </Target>
 
