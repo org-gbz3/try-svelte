@@ -36,7 +36,8 @@
         "ms-dotnettools.csdevkit",
         "svelte.svelte-vscode",
         "esbenp.prettier-vscode",
-        "anthropic.claude-code"
+        "anthropic.claude-code",
+        "openai.chatgpt"
       ]
     }
   }
