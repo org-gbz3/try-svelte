@@ -1,16 +1,16 @@
 {
   "name": "${localWorkspaceFolderBasename}",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
+  "dockerComposeFile": "compose.yaml",
+  "service": "app",
+  "runServices": ["app", "sqlserver"],
+  "workspaceFolder": "/workspaces/try-svelte",
+  "shutdownAction": "stopCompose",
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/node:1": {
       "version": "22"
     }
   },
-  // Codex のサンドボックスが namespace を作成できるようにする。
-  "runArgs": ["--security-opt=seccomp=unconfined"],
   "remoteUser": "vscode",
   /*
   "remoteEnv": {
