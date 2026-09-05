@@ -4,28 +4,39 @@
     "dockerfile": "Dockerfile"
   },
   "features": {
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    }
   },
-  "remoteUser": "node",
+  "remoteUser": "vscode",
   /*
   "remoteEnv": {
     "GH_TOKEN": "${localEnv:GH_TOKEN}"
   },
   */
-  "postCreateCommand": "if [ -f package.json ]; then npm install; fi",
+  "postCreateCommand": "if find . -maxdepth 3 \\( -name '*.sln' -o -name '*.csproj' \\) | grep -q .; then dotnet restore; fi; if [ -f package.json ]; then npm install; fi",
   "postStartCommand": "printf '%s\n' 'GH_TOKEN is not injected automatically during container setup. If you need gh authentication, export GH_TOKEN manually inside the container only when needed.'",
-  "forwardPorts": [5173],
+  "forwardPorts": [5000, 5001, 5173],
   "portsAttributes": {
-    "5173": {
-      "label": "Vite Dev Server",
+    "5000": {
+      "label": "ASP.NET Backend (HTTP)",
       "onAutoForward": "openPreview"
+    },
+    "5001": {
+      "label": "ASP.NET Backend (HTTPS)"
+    },
+    "5173": {
+      "label": "Vite Dev Server (frontend iteration only)"
     }
   },
   "customizations": {
     "vscode": {
       "extensions": [
+        "ms-dotnettools.csdevkit",
         "svelte.svelte-vscode",
-        "esbenp.prettier-vscode"
+        "esbenp.prettier-vscode",
+        "anthropic.claude-code"
       ]
     }
   }
