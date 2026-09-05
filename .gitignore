@@ -26,3 +26,17 @@ Thumbs.db
 
 # Generic caches
 .cache/
+
+# .NET build output
+backend/bin/
+backend/obj/
+
+# Visual Studio solution-local cache and user-specific project settings
+.vs/
+*.user
+
+# Stray cache from `dotnet run` file-based execution accidentally created at repo root
+/dotnet/
+
+# SvelteKit build output copied into backend/wwwroot at build time
+backend/wwwroot/
