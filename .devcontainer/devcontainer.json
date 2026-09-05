@@ -15,13 +15,13 @@
     "GH_TOKEN": "${localEnv:GH_TOKEN}"
   },
   */
-  "postCreateCommand": "if find . -maxdepth 3 \\( -name '*.sln' -o -name '*.csproj' \\) | grep -q .; then dotnet restore; fi; if [ -f package.json ]; then npm install; fi",
+  "postCreateCommand": "if find . -maxdepth 3 \\( -name '*.sln' -o -name '*.csproj' \\) | grep -q .; then dotnet restore; fi; if [ -f frontend/package.json ]; then npm --prefix frontend install; fi",
   "postStartCommand": "printf '%s\n' 'GH_TOKEN is not injected automatically during container setup. If you need gh authentication, export GH_TOKEN manually inside the container only when needed.'",
   "forwardPorts": [5000, 5001, 5173],
   "portsAttributes": {
     "5000": {
       "label": "ASP.NET Backend (HTTP)",
-      "onAutoForward": "openPreview"
+      "onAutoForward": "notify"
     },
     "5001": {
       "label": "ASP.NET Backend (HTTPS)"

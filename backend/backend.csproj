@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
+  </ItemGroup>
+
+  <!--
+    Build the SvelteKit SPA into wwwroot before publishing. This must run before
+    ComputeFilesToPublish: the static web assets glob over wwwroot is evaluated
+    before target execution, so files the frontend build produces are added
+    explicitly to ResolvedFileToPublish rather than relying on that glob.
+  -->
+  <Target Name="BuildFrontend" BeforeTargets="ComputeFilesToPublish">
+    <Exec Command="npm ci" WorkingDirectory="../frontend" />
+    <Exec Command="npm run build" WorkingDirectory="../frontend" />
+
+    <ItemGroup>
+      <FrontendDist Include="wwwroot/**" />
+      <ResolvedFileToPublish Include="@(FrontendDist)">
+        <RelativePath>wwwroot/%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+</Project>
