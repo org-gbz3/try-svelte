@@ -29,3 +29,7 @@ dotnet publish backend -c Release
 
 `dotnet publish` 実行時に MSBuild ターゲットが `frontend` で `npm ci && npm run build` を実行し、
 ビルド成果物が自動的に `backend/wwwroot` に生成される。
+
+## DESINE.md
+
+- [pre-design-md](https://pre-design-md.dev/)

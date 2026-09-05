@@ -28,67 +28,125 @@
 </script>
 
 <main>
-	<h1>アカウント作成</h1>
-	<form onsubmit={handleSubmit}>
-		<label>
-			メールアドレス
-			<input type="email" autocomplete="email" bind:value={email} required />
-		</label>
-		<label>
-			パスワード
-			<input type="password" autocomplete="new-password" bind:value={password} required />
-		</label>
-		<label>
-			パスワード（確認）
-			<input type="password" autocomplete="new-password" bind:value={passwordConfirm} required />
-		</label>
-		{#if error}
-			<p class="error">{error}</p>
-		{/if}
-		<button type="submit">アカウント作成</button>
-	</form>
-	<p class="switch">すでにアカウントをお持ちの方は <a href="/login">ログイン</a></p>
+	<div class="card">
+		<h1>アカウント作成</h1>
+		<form onsubmit={handleSubmit}>
+			<label>
+				メールアドレス
+				<input type="email" autocomplete="email" bind:value={email} required />
+			</label>
+			<label>
+				パスワード
+				<input type="password" autocomplete="new-password" bind:value={password} required />
+			</label>
+			<label>
+				パスワード（確認）
+				<input
+					type="password"
+					autocomplete="new-password"
+					bind:value={passwordConfirm}
+					required
+				/>
+			</label>
+			{#if error}
+				<p class="error">{error}</p>
+			{/if}
+			<button type="submit">アカウント作成</button>
+		</form>
+		<p class="switch">すでにアカウントをお持ちの方は <a href="/login">ログイン</a></p>
+	</div>
 </main>
 
 <style>
 	main {
-		max-width: 320px;
-		margin: 4rem auto;
-		padding: 0 1rem;
+		max-width: 400px;
+		margin: var(--space-5xl) auto;
+		padding: 0 var(--space-xl);
+	}
+
+	.card {
+		background: #fff;
+		border-radius: var(--radius-card);
+		box-shadow: var(--shadow-md);
+		padding: var(--space-2xl);
 	}
 
 	form {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		gap: var(--space-md);
+		margin-top: var(--space-xl);
 	}
 
 	label {
 		display: flex;
 		flex-direction: column;
-		gap: 0.25rem;
-		font-size: 0.9rem;
+		gap: var(--space-xs);
+		font-size: var(--font-size-body);
+		color: var(--color-neutral-700);
 	}
 
 	input {
-		padding: 0.5rem;
-		font-size: 1rem;
+		padding: var(--space-md) var(--space-lg);
+		font-family: var(--font-family-base);
+		font-size: var(--font-size-body);
+		color: var(--color-neutral-900);
+		background: var(--color-neutral-50);
+		border: 1px solid var(--color-neutral-300);
+		border-radius: var(--radius-input);
+	}
+
+	input:focus-visible {
+		outline: 2px solid var(--color-primary);
+		outline-offset: 2px;
+		border-color: var(--color-primary);
 	}
 
 	button {
-		padding: 0.6rem;
-		font-size: 1rem;
+		margin-top: var(--space-sm);
+		padding: var(--space-md) var(--space-lg);
+		font-family: var(--font-family-base);
+		font-size: var(--font-size-body);
+		font-weight: var(--font-weight-heading);
+		color: #fff;
+		background: var(--color-primary);
+		border: none;
+		border-radius: var(--radius-button);
+		box-shadow: var(--shadow-sm);
 		cursor: pointer;
 	}
 
+	button:hover {
+		background: var(--color-primary-600);
+	}
+
+	button:active {
+		background: var(--color-primary-700);
+	}
+
+	button:focus-visible {
+		outline: 2px solid var(--color-primary);
+		outline-offset: 2px;
+	}
+
+	button:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
 	.error {
-		color: #c0392b;
 		margin: 0;
-		font-size: 0.9rem;
+		font-size: var(--font-size-body);
+		color: var(--color-danger);
 	}
 
 	.switch {
-		margin-top: 1rem;
-		font-size: 0.9rem;
+		margin: var(--space-xl) 0 0;
+		font-size: var(--font-size-caption);
+		color: var(--color-neutral-600);
+	}
+
+	.switch a {
+		color: var(--color-primary);
 	}
 </style>

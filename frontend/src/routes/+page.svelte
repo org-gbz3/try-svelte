@@ -14,22 +14,60 @@
 
 {#if auth.isLoggedIn}
 	<main>
-		<h1>トップ画面</h1>
-		<p>{auth.user?.email} でログイン中です。</p>
-		<button onclick={handleLogout}>ログアウト</button>
+		<div class="card">
+			<h1>トップ画面</h1>
+			<p>{auth.user?.email} でログイン中です。</p>
+			<button onclick={handleLogout}>ログアウト</button>
+		</div>
 	</main>
 {/if}
 
 <style>
 	main {
 		max-width: 480px;
-		margin: 4rem auto;
-		padding: 0 1rem;
+		margin: var(--space-5xl) auto;
+		padding: 0 var(--space-xl);
+	}
+
+	.card {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: var(--space-lg);
+		background: #fff;
+		border-radius: var(--radius-card);
+		box-shadow: var(--shadow-md);
+		padding: var(--space-2xl);
+	}
+
+	p {
+		margin: 0;
+		color: var(--color-neutral-700);
 	}
 
 	button {
-		padding: 0.6rem 1rem;
-		font-size: 1rem;
+		padding: var(--space-md) var(--space-lg);
+		font-family: var(--font-family-base);
+		font-size: var(--font-size-body);
+		font-weight: var(--font-weight-heading);
+		color: #fff;
+		background: var(--color-primary);
+		border: none;
+		border-radius: var(--radius-button);
+		box-shadow: var(--shadow-sm);
 		cursor: pointer;
+	}
+
+	button:hover {
+		background: var(--color-primary-600);
+	}
+
+	button:active {
+		background: var(--color-primary-700);
+	}
+
+	button:focus-visible {
+		outline: 2px solid var(--color-primary);
+		outline-offset: 2px;
 	}
 </style>
