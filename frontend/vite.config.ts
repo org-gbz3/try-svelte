@@ -13,7 +13,16 @@ export default defineConfig({
 				pages: '../backend/wwwroot',
 				assets: '../backend/wwwroot',
 				fallback: 'index.html'
-			})
+			}),
+			csp: {
+				mode: 'auto',
+				directives: {
+					'default-src': ['self'],
+					'style-src': ['self', 'https://fonts.googleapis.com'],
+					'font-src': ['self', 'https://fonts.gstatic.com'],
+					'img-src': ['self', 'data:']
+				}
+			},
 		})
 	],
 	server: {
