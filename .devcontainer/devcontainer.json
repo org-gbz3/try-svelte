@@ -9,6 +9,8 @@
       "version": "22"
     }
   },
+  // Codex のサンドボックスが namespace を作成できるようにする。
+  "runArgs": ["--security-opt=seccomp=unconfined"],
   "remoteUser": "vscode",
   /*
   "remoteEnv": {

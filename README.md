@@ -7,6 +7,12 @@ SvelteKit(SPA)をビルドして `backend/wwwroot` に配備し、ASP.NET Core(.
 - `backend/` — ASP.NET Core Web API（Controllers ベース、.NET 10）。`wwwroot` に配置された静的ファイルを配信し、API は `api/` 配下。
 - `frontend/` — SvelteKit（`@sveltejs/adapter-static` によるSPAビルド）。ビルド出力は直接 `backend/wwwroot` へ書き出される。
 
+## Dev Container
+
+Codex のサンドボックスで namespace を作成できるよう、コンテナの起動時に
+`--security-opt=seccomp=unconfined` を指定している。このコンテナ全体の seccomp 制限が解除される。
+設定変更後は VS Code の「Dev Containers: Rebuild Container」で再作成する。
+
 ## 開発
 
 2つのターミナルで並行起動する。
