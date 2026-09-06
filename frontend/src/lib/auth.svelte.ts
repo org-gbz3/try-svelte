@@ -67,10 +67,14 @@ export const auth = {
 		if (!response.ok) throw await responseError(response, 'アカウントを登録できませんでした。');
 	},
 	async logout() {
-		const response = await post('/api/auth/logout');
-		// サーバー側で Cookie は既に削除されているため、応答の成否に関わらずローカル状態は解除する。
-		user = null;
-		status = 'anonymous';
-		if (!response.ok) throw await responseError(response, 'ログアウトできませんでした。');
+		// サーバー側で Cookie は既に削除されているため、通信自体が失敗しても
+		// ローカル状態は解除する(例外の有無にかかわらず finally で必ず実行)。
+		try {
+			const response = await post('/api/auth/logout');
+			if (!response.ok) throw await responseError(response, 'ログアウトできませんでした。');
+		} finally {
+			user = null;
+			status = 'anonymous';
+		}
 	}
 };

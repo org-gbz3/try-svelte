@@ -1,6 +1,6 @@
 import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
 	plugins: [
@@ -36,5 +36,13 @@ export default defineConfig({
 		proxy: {
 			'/api': 'http://localhost:5000'
 		}
+	},
+	// Svelte のパッケージ解決を "browser" 条件へ固定し、mount() を使える
+	// クライアント向けビルドをテストでも読み込ませる (既定では SSR 用ビルドが解決される)。
+	resolve: process.env.VITEST ? { conditions: ['browser'] } : undefined,
+	test: {
+		environment: 'jsdom',
+		include: ['src/**/*.{test,spec}.{js,ts}'],
+		setupFiles: ['./vitest-setup.ts']
 	}
 });

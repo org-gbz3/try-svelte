@@ -124,6 +124,7 @@ TLS をリバースプロキシで終端する場合は、信頼するプロキ�
 
 ```sh
 npm --prefix frontend run check
+npm --prefix frontend run test
 dotnet build backend
 dotnet test backend.Tests
 dotnet publish backend -c Release
