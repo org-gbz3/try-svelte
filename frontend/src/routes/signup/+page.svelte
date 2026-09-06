@@ -56,6 +56,8 @@
 					type="password"
 					autocomplete="new-password"
 					bind:value={passwordConfirm}
+					minlength="12"
+					maxlength="128"
 					required
 				/>
 			</label>

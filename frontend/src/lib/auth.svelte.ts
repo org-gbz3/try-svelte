@@ -25,7 +25,8 @@ async function post(path: string, body?: unknown): Promise<Response> {
 	// ログイン前後でトークンの対象ユーザーが変わるため、更新操作の直前に取得する。
 	const csrf = await apiFetch('/api/auth/csrf');
 	if (!csrf.ok) throw new Error('認証の準備に失敗しました。再試行してください。');
-	const { token } = await csrf.json();
+	const { token } = await csrf.json().catch(() => ({ token: undefined }));
+	if (!token) throw new Error('認証の準備に失敗しました。再試行してください。');
 	return apiFetch(path, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': token },
@@ -67,8 +68,9 @@ export const auth = {
 	},
 	async logout() {
 		const response = await post('/api/auth/logout');
-		if (!response.ok) throw await responseError(response, 'ログアウトできませんでした。');
+		// サーバー側で Cookie は既に削除されているため、応答の成否に関わらずローカル状態は解除する。
 		user = null;
 		status = 'anonymous';
+		if (!response.ok) throw await responseError(response, 'ログアウトできませんでした。');
 	}
 };

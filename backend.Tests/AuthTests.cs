@@ -245,6 +245,21 @@ public class AuthTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Fact(DisplayName = "ログインへの過剰なリクエストはレート制限で拒否する")]
+    public async Task LoginEnforcesRateLimit()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = CreateCredentials();
+        HttpStatusCode lastStatus = HttpStatusCode.OK;
+        for (var i = 0; i < 21; i++)
+        {
+            using var response = await Post(client, "login", credentials);
+            lastStatus = response.StatusCode;
+        }
+        Assert.Equal(HttpStatusCode.TooManyRequests, lastStatus);
+    }
+
     [Fact(DisplayName = "別ブラウザーのCSRFトークンでのログインを拒否する")]
     public async Task LoginRejectsCsrfTokenFromAnotherBrowser()
     {

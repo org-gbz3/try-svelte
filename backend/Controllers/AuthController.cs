@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
@@ -20,6 +21,7 @@ public class AuthController(UserManager<IdentityUser> users,
         token = antiforgery.GetAndStoreTokens(HttpContext).RequestToken
     });
 
+    [EnableRateLimiting("auth")]
     [HttpPost("register")]
     public async Task<IActionResult> Register(Credentials request)
     {
@@ -44,14 +46,16 @@ public class AuthController(UserManager<IdentityUser> users,
         return StatusCode(StatusCodes.Status201Created);
     }
 
+    [EnableRateLimiting("auth")]
     [HttpPost("login")]
     public async Task<IActionResult> Login(Credentials request)
     {
-        var result = await signIn.PasswordSignInAsync(request.Email.Trim(), request.Password,
-            isPersistent: false, lockoutOnFailure: true);
+        var user = await users.FindByNameAsync(request.Email.Trim());
+        var result = user is null
+            ? Microsoft.AspNetCore.Identity.SignInResult.Failed
+            : await signIn.PasswordSignInAsync(user, request.Password, isPersistent: false, lockoutOnFailure: true);
         if (!result.Succeeded)
             return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
-        var user = await users.FindByNameAsync(request.Email.Trim());
         return Ok(new { id = user!.Id, email = user.Email });
     }
 
