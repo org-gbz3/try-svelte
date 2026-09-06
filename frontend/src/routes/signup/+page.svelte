@@ -8,6 +8,14 @@
 	let error = $state('');
 	let submitting = $state(false);
 
+	const passwordRequirements = $derived([
+		{ label: '12文字以上', met: password.length >= 12 },
+		{ label: '大文字を含む', met: /[A-Z]/.test(password) },
+		{ label: '小文字を含む', met: /[a-z]/.test(password) },
+		{ label: '数字を含む', met: /[0-9]/.test(password) },
+		{ label: '記号を含む', met: /[^A-Za-z0-9]/.test(password) }
+	]);
+
 	$effect(() => {
 		if (auth.isLoggedIn) goto('/');
 	});
@@ -40,7 +48,6 @@
 <main>
 	<div class="card">
 		<h1>アカウント作成</h1>
-		<p>パスワードは12文字以上で、大文字・小文字・数字・記号を含めてください。</p>
 		<form onsubmit={handleSubmit}>
 			<label>
 				メールアドレス
@@ -48,8 +55,24 @@
 			</label>
 			<label>
 				パスワード
-				<input type="password" autocomplete="new-password" bind:value={password} minlength="12" maxlength="128" required />
+				<input
+					type="password"
+					autocomplete="new-password"
+					bind:value={password}
+					minlength="12"
+					maxlength="128"
+					required
+					aria-describedby="password-requirements"
+				/>
 			</label>
+			<ul id="password-requirements" class="requirements">
+				{#each passwordRequirements as requirement (requirement.label)}
+					<li class:met={requirement.met}>
+						<span aria-hidden="true">{requirement.met ? '✓' : '○'}</span>
+						{requirement.label}
+					</li>
+				{/each}
+			</ul>
 			<label>
 				パスワード（確認）
 				<input
@@ -145,6 +168,27 @@
 	button:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
+	}
+
+	.requirements {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: var(--space-2xs) var(--space-md);
+		margin: calc(-1 * var(--space-xs)) 0 0;
+		padding: 0;
+		list-style: none;
+		font-size: var(--font-size-caption);
+		color: var(--color-neutral-500);
+	}
+
+	.requirements li {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2xs);
+	}
+
+	.requirements li.met {
+		color: var(--color-success);
 	}
 
 	.error {
