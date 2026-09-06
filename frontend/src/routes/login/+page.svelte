@@ -1,43 +1,57 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/auth.svelte';
 
 	let email = $state('');
 	let password = $state('');
 	let error = $state('');
+	let submitting = $state(false);
 
 	$effect(() => {
 		if (auth.isLoggedIn) goto('/');
 	});
 
-	function handleSubmit(event: SubmitEvent) {
+	async function handleSubmit(event: SubmitEvent) {
 		event.preventDefault();
+		if (submitting) return;
 		if (!email || !password) {
 			error = 'メールアドレスとパスワードを入力してください';
 			return;
 		}
 		error = '';
-		auth.login(email);
-		goto('/');
+		submitting = true;
+		try {
+			await auth.login(email, password);
+			await goto("/");
+		} catch (cause) {
+			error = cause instanceof TypeError ? '通信に失敗しました。接続を確認してください。'
+				: cause instanceof Error ? cause.message : '処理に失敗しました。';
+		} finally {
+			submitting = false;
+		}
 	}
 </script>
 
 <main>
 	<div class="card">
 		<h1>ログイン</h1>
+		{#if page.url.searchParams.get("registered") === "1"}
+			<p role="status">アカウントを登録しました。ログインしてください。</p>
+		{/if}
 		<form onsubmit={handleSubmit}>
 			<label>
 				メールアドレス
-				<input type="email" autocomplete="email" bind:value={email} required />
+				<input type="email" autocomplete="email" bind:value={email} maxlength="254" required />
 			</label>
 			<label>
 				パスワード
-				<input type="password" autocomplete="current-password" bind:value={password} required />
+				<input type="password" autocomplete="current-password" bind:value={password} maxlength="128" required />
 			</label>
 			{#if error}
-				<p class="error">{error}</p>
+				<p class="error" role="alert">{error}</p>
 			{/if}
-			<button type="submit">ログイン</button>
+			<button type="submit" disabled={submitting}>ログイン</button>
 		</form>
 		<p class="switch">アカウントをお持ちでない方は <a href="/signup">アカウント作成</a></p>
 	</div>

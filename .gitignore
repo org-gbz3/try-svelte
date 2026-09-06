@@ -30,6 +30,9 @@ Thumbs.db
 # .NET build output
 backend/bin/
 backend/obj/
+backend.Tests/bin/
+backend.Tests/obj/
+TestResults/
 
 # Visual Studio solution-local cache and user-specific project settings
 .vs/

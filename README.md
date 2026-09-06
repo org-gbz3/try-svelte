@@ -41,8 +41,8 @@ DB ツールにホストとポートの別欄がある場合は、それぞれ `
 ポートは Docker ホストのループバックアドレスだけに公開する。
 リモート Docker ホストを利用する場合は、SSH トンネルなどでそのホストの 1433 番ポートへ接続する。
 
-現時点ではアプリ用 DB・ログイン用テーブル・バックエンドの接続設定は作成しない。
-後続のログイン機能実装で追加する。
+認証用 DB は `TrySvelte`、ユーザー管理は ASP.NET Core Identity と EF Core を使用する。
+初回は以下の「認証 DB の準備」を実行する。コンテナ起動だけでは DB を作成しない。
 
 DB データは名前付きボリューム `sqlserver-data` に保存し、通常の停止やコンテナ再作成では保持する。
 既存データがある場合、`.env` の変更だけでは `sa` のパスワードは変更されないため、SQL Server 側で変更する。
@@ -67,6 +67,75 @@ dotnet run
 cd frontend
 npm run dev
 ```
+
+## 認証 DB の準備
+
+リポジトリ直下で実行する。接続文字列は Git 管理対象の設定ファイルに保存しない。
+以下は開発用の例で、`YOUR_PASSWORD` は `.devcontainer/.env` に設定した値へ置き換える。
+パスワードにセミコロンなどを含む場合は、SQL Server 接続文字列の規則に従って値を引用する。
+
+```sh
+export ConnectionStrings__AuthDatabase='Server=sqlserver,1433;Database=TrySvelte;User Id=sa;Password=YOUR_PASSWORD;Encrypt=True;TrustServerCertificate=True'
+dotnet tool restore
+dotnet ef database update --project backend
+```
+
+バックエンドは同じ環境変数を設定したターミナルから起動する。
+開発コンテナ外から実行する場合は接続先を `127.0.0.1,1433`（または変更したポート）にする。
+環境変数の代わりに .NET User Secrets の `ConnectionStrings:AuthDatabase` も利用できる。
+マイグレーションは `backend/Data/Migrations` に管理し、起動時の自動適用は行わない。
+
+## ログイン機能
+
+ASP.NET Core Identity の Cookie 認証を使用する。登録後はログイン画面へ移動する。
+パスワードは12〜128文字で、大文字・小文字・数字・記号をそれぞれ含める。
+ログイン失敗5回で15分間ロックアウトする。メール確認・パスワード再設定・MFA は未実装。
+
+| API | 動作 |
+| --- | --- |
+| `GET /api/auth/csrf` | CSRF Cookie と JSON の `token` を取得 |
+| `POST /api/auth/register` | `{ email, password }` で登録。成功 `201`、入力不備・登録不可 `400` |
+| `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email }`、認証失敗 `401` |
+| `GET /api/auth/me` | 認証済みなら `200` と `{ id, email }`、未認証なら `401` |
+| `POST /api/auth/logout` | Cookie を削除し `204` |
+
+更新 API は直前に `/api/auth/csrf` を呼び、返却されたトークンを `X-CSRF-TOKEN` ヘッダーに設定する。
+Cookie も同時に送信する。CSRF トークンなし・不正なトークンは `400`。
+ログイン前後でトークンの対象ユーザーが変わるため、トークンを使い回さない。
+認証 API の応答は `Cache-Control: no-store` を返す。
+
+SPA は起動・再読み込み時に `/api/auth/me` を呼ぶ。確認中は待機表示、通信・サーバーエラー時は
+再試行画面を表示し、未ログインとは区別する。ユーザー情報はメモリ上に保持し、localStorage は認証に使用しない。
+保護された API は `frontend/src/lib/auth.svelte.ts` の `apiFetch` 経由で呼び出す。
+`401` は未ログインへ遷移し、`403` は権限不足として認証状態を維持する。
+画面表示とは独立して API ごとに `[Authorize]` で認証する（`/api/weatherforecast` も保護対象）。
+存在しない `/api` 配下の URL は SPA の HTML ではなく `404` を返す。
+
+認証 Cookie は HttpOnly・SameSite=Lax、有効期間は8時間、スライディング延長なし。
+永続 Cookie は発行しない。本番環境では認証・CSRF Cookie に Secure を必須とするため HTTPS で配信する。
+開発時は既存の Vite `/api` プロキシ経由で HTTP を利用できる。
+通常のログアウトはそのブラウザーの Cookie を削除する。他端末の一括ログアウトは未実装。
+
+本番では専用の DB ユーザーと検証可能な SQL Server 証明書を使用する。
+ASP.NET Core Data Protection の鍵は再起動後も保持し、複数インスタンスの場合は共有する。
+TLS をリバースプロキシで終端する場合は、信頼するプロキシを限定して転送ヘッダーを設定する。
+
+## 確認
+
+```sh
+npm --prefix frontend run check
+dotnet build backend
+dotnet test backend.Tests
+dotnet publish backend -c Release
+```
+
+`dotnet test backend.Tests` は、各テストの確認内容を日本語の表示名で、成否・所要時間とともに出力する。
+各テストメソッドは1つの確認観点を扱い、個別のメモリ DB で独立して実行する。登録・ログインの準備処理はヘルパーにまとめる。
+詳細ログが必要な場合は `dotnet test backend.Tests --logger "console;verbosity=detailed"` で上書きできる。
+
+統合テストは SQLite のメモリ DB と実際の Identity・Cookie・CSRF 処理を使用し、
+登録・重複・入力検証・認証失敗・ロックアウト・ログイン状態取得・ログアウト・API の認証保護を確認する。
+SQL Server 固有のマイグレーション適用は、開発用 SQL Server で別途確認する。
 
 ## ビルド・配備
 
