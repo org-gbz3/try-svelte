@@ -3,12 +3,24 @@
 	import { auth } from '$lib/auth.svelte';
 
 	$effect(() => {
-		if (!auth.isLoggedIn) goto('/login');
+		if (auth.status === 'anonymous') goto('/login');
 	});
 
-	function handleLogout() {
-		auth.logout();
-		goto('/login');
+	let error = $state('');
+	let submitting = $state(false);
+
+	async function handleLogout() {
+		if (submitting) return;
+		submitting = true;
+		error = '';
+		try {
+			await auth.logout();
+			await goto('/login');
+		} catch {
+			error = 'ログアウトできませんでした。接続を確認して再試行してください。';
+		} finally {
+			submitting = false;
+		}
 	}
 </script>
 
@@ -17,7 +29,8 @@
 		<div class="card">
 			<h1>トップ画面</h1>
 			<p>{auth.user?.email} でログイン中です。</p>
-			<button onclick={handleLogout}>ログアウト</button>
+			<button onclick={handleLogout} disabled={submitting}>ログアウト</button>
+			{#if error}<p role="alert">{error}</p>{/if}
 		</div>
 	</main>
 {/if}

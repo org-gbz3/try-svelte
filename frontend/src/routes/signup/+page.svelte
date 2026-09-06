@@ -6,13 +6,15 @@
 	let password = $state('');
 	let passwordConfirm = $state('');
 	let error = $state('');
+	let submitting = $state(false);
 
 	$effect(() => {
 		if (auth.isLoggedIn) goto('/');
 	});
 
-	function handleSubmit(event: SubmitEvent) {
+	async function handleSubmit(event: SubmitEvent) {
 		event.preventDefault();
+		if (submitting) return;
 		if (!email || !password || !passwordConfirm) {
 			error = 'すべての項目を入力してください';
 			return;
@@ -22,22 +24,31 @@
 			return;
 		}
 		error = '';
-		auth.signup(email);
-		goto('/');
+		submitting = true;
+		try {
+			await auth.signup(email, password);
+			await goto("/login?registered=1");
+		} catch (cause) {
+			error = cause instanceof TypeError ? '通信に失敗しました。接続を確認してください。'
+				: cause instanceof Error ? cause.message : '処理に失敗しました。';
+		} finally {
+			submitting = false;
+		}
 	}
 </script>
 
 <main>
 	<div class="card">
 		<h1>アカウント作成</h1>
+		<p>パスワードは12文字以上で、大文字・小文字・数字・記号を含めてください。</p>
 		<form onsubmit={handleSubmit}>
 			<label>
 				メールアドレス
-				<input type="email" autocomplete="email" bind:value={email} required />
+				<input type="email" autocomplete="email" bind:value={email} maxlength="254" required />
 			</label>
 			<label>
 				パスワード
-				<input type="password" autocomplete="new-password" bind:value={password} required />
+				<input type="password" autocomplete="new-password" bind:value={password} minlength="12" maxlength="128" required />
 			</label>
 			<label>
 				パスワード（確認）
@@ -45,13 +56,15 @@
 					type="password"
 					autocomplete="new-password"
 					bind:value={passwordConfirm}
+					minlength="12"
+					maxlength="128"
 					required
 				/>
 			</label>
 			{#if error}
-				<p class="error">{error}</p>
+				<p class="error" role="alert">{error}</p>
 			{/if}
-			<button type="submit">アカウント作成</button>
+			<button type="submit" disabled={submitting}>アカウント作成</button>
 		</form>
 		<p class="switch">すでにアカウントをお持ちの方は <a href="/login">ログイン</a></p>
 	</div>

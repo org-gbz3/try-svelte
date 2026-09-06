@@ -1,8 +1,10 @@
 {
   "name": "${localWorkspaceFolderBasename}",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
+  "dockerComposeFile": "compose.yaml",
+  "service": "app",
+  "runServices": ["app", "sqlserver"],
+  "workspaceFolder": "/workspaces/try-svelte",
+  "shutdownAction": "stopCompose",
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/node:1": {
@@ -36,7 +38,8 @@
         "ms-dotnettools.csdevkit",
         "svelte.svelte-vscode",
         "esbenp.prettier-vscode",
-        "anthropic.claude-code"
+        "anthropic.claude-code",
+        "openai.chatgpt"
       ]
     }
   }
