@@ -25,6 +25,26 @@ describe('signup page', () => {
 		expect(confirm.maxLength).toBe(password.maxLength);
 	});
 
+	it('入力したパスワードの複雑さ要件をリアルタイムに表示する', async () => {
+		render(Page);
+		const password = screen.getByLabelText('パスワード');
+		const item = (label: string) => screen.getByText(label).closest('li')!;
+
+		expect(item('12文字以上').classList.contains('met')).toBe(false);
+		expect(item('記号を含む').classList.contains('met')).toBe(false);
+
+		await fireEvent.input(password, { target: { value: 'password1234' } });
+		expect(item('12文字以上').classList.contains('met')).toBe(true);
+		expect(item('大文字を含む').classList.contains('met')).toBe(false);
+		expect(item('記号を含む').classList.contains('met')).toBe(false);
+
+		await fireEvent.input(password, { target: { value: 'Password-123!ABC' } });
+		expect(item('大文字を含む').classList.contains('met')).toBe(true);
+		expect(item('小文字を含む').classList.contains('met')).toBe(true);
+		expect(item('数字を含む').classList.contains('met')).toBe(true);
+		expect(item('記号を含む').classList.contains('met')).toBe(true);
+	});
+
 	it('パスワードが一致しない場合はエラーを表示し signup を呼ばない', async () => {
 		const signupSpy = vi.spyOn(auth, 'signup');
 		render(Page);
