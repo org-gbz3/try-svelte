@@ -128,6 +128,9 @@ npm --prefix frontend run test
 dotnet build backend
 dotnet test backend.Tests
 dotnet publish backend -c Release
+
+# ワンライナーで起動
+npm --prefix frontend run build && dotnet run --project backend
 ```
 
 `dotnet test backend.Tests` は、各テストの確認内容を日本語の表示名で、成否・所要時間とともに出力する。
