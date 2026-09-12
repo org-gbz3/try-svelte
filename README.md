@@ -85,16 +85,79 @@ dotnet ef database update --project backend
 環境変数の代わりに .NET User Secrets の `ConnectionStrings:AuthDatabase` も利用できる。
 マイグレーションは `backend/Data/Migrations` に管理し、起動時の自動適用は行わない。
 
+## 確認メールの設定
+
+`backend/appsettings.json` の `Email` に各項目の日本語コメントを記載している。
+ASP.NET Core はこの設定ファイルのコメントを読み飛ばす。
+
+| 項目 | 設定する値 |
+| --- | --- |
+| `PublicBaseUrl` | 利用者が開く SPA の URL。Vite 開発時は `http://localhost:5173`、バックエンドから配信する場合はその URL。本番は HTTPS 必須 |
+| `Host` | 配信サービスの SMTP ホスト名 |
+| `Port` | STARTTLS 用ポート（通常 `587`）。暗黙 TLS の `465` は非対応 |
+| `EnableSsl` | STARTTLS を使用する場合 `true`。認証不要のローカル受信サーバーのみ `false` を使用 |
+| `From` | 配信サービスで許可・検証済みの差出人アドレス |
+| `Username` | SMTP 認証ユーザー名。開発用で認証不要なら空欄 |
+| `Password` | SMTP パスワード。設定ファイルには保存せず User Secrets または `Email__Password` 環境変数で指定 |
+
+### Resend を使用する
+
+設定ファイルは Resend SMTP（`smtp.resend.com:587`、STARTTLS 有効、ユーザー名 `resend`）を使用する。
+Resend の API Keys 画面で送信権限を持つ API キーを作成し、SMTP パスワードとして保存する。
+バックエンドを起動する Dev Container 内のリポジトリ直下で実行する。
+以前の SMTP 設定が User Secrets に残っていても切り替わるよう、接続先も指定する。
+
+```sh
+dotnet user-secrets set "Email:Host" "smtp.resend.com" --project backend
+dotnet user-secrets set "Email:Port" "587" --project backend
+dotnet user-secrets set "Email:EnableSsl" "true" --project backend
+dotnet user-secrets set "Email:From" "onboarding@resend.dev" --project backend
+dotnet user-secrets set "Email:Username" "resend" --project backend
+dotnet user-secrets set "Email:Password" "YOUR_RESEND_API_KEY" --project backend
+```
+
+初期の差出人 `onboarding@resend.dev` はテスト用で、宛先には Resend アカウントの登録メールアドレスを使う。
+他の利用者へ送信する場合は Resend の Domains で所有ドメインの DNS 検証を完了し、
+`Email:From` をそのドメインの差出人（例: `noreply@your-domain.example`）に変更する。
+API キーで送信可能なドメインを制限している場合は、この差出人のドメインを許可する。
+
+環境変数 `Email__*` は User Secrets より優先されるため、古い接続情報があれば更新する。
+`PublicBaseUrl` はメールを開くブラウザーからアクセスできる SPA の URL にする。
+設定後にバックエンドを再起動し、ログイン画面の「確認メールを再送」で確認する。
+Resend の Emails 画面でも送信結果を確認できる。
+
+参考: [Resend SMTP 設定](https://resend.com/docs/send-with-smtp)、
+[テスト用ドメインの宛先制限](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain)。
+
+SMTP 設定が空欄の場合は送信できない。送信失敗時は未確認アカウントを保持して `503` を返し、
+ログイン画面の「確認メールを再送」から復旧できる。再送は登録状態を公開しない同じ応答を返すため、
+その成功応答は配送完了の保証ではない。送信は最大30秒で打ち切り、自動再試行・配送キューは使用しない。
+
+送信失敗時は例外の種類と SMTP ステータスをサーバーログに記録する。
+Development 環境では SMTP サーバーの応答・内部例外・スタックトレースも記録するため、
+バックエンドを再起動して「確認メールを再送」から原因を確認できる。
+詳細ログにはメールアドレスなどが含まれる場合があるため、共有時は伏せる。
+パスワードや接続設定全体はログ出力しない。本番では例外本文を記録せず、API 応答にも詳細を返さない。
+
+確認トークンは Identity が生成・検証し、有効期限は24時間。
+リンクのフラグメントに格納し、確認画面のボタンから CSRF 対策付き POST で送る。
+メールスキャナーがリンクを開くだけでは確認済みにならない。
+Data Protection の鍵を保持しないと再起動後に既存リンクが無効になることがある。
+既存アカウントも `EmailConfirmed` が false ならログインできなくなるため、再送から確認を行う。
+既存の Identity テーブルを使用するので追加マイグレーションは不要。
+
 ## ログイン機能
 
-ASP.NET Core Identity の Cookie 認証を使用する。登録後はログイン画面へ移動する。
+ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メールを送信し、ログイン画面へ移動する。メール内のリンクを開き、確認ボタンを押すまでログインできない。
 パスワードは12〜128文字で、大文字・小文字・数字・記号をそれぞれ含める。
-ログイン失敗5回で15分間ロックアウトする。メール確認・パスワード再設定・MFA は未実装。
+ログイン失敗5回で15分間ロックアウトする。パスワード再設定・MFA は未実装。
 
 | API | 動作 |
 | --- | --- |
 | `GET /api/auth/csrf` | CSRF Cookie と JSON の `token` を取得 |
 | `POST /api/auth/register` | `{ email, password }` で登録。成功 `201`、入力不備・登録不可 `400` |
+| `POST /api/auth/confirm-email` | `{ userId, token }` で確認。成功 `204`、無効・期限切れ `400` |
+| `POST /api/auth/resend-confirmation` | `{ email }` で再送。未登録・確認済みも同じ `200` 応答 |
 | `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email }`、認証失敗 `401` |
 | `GET /api/auth/me` | 認証済みなら `200` と `{ id, email }`、未認証なら `401` |
 | `POST /api/auth/logout` | Cookie を削除し `204` |

@@ -66,6 +66,15 @@ export const auth = {
 		const response = await post('/api/auth/register', { email, password });
 		if (!response.ok) throw await responseError(response, 'アカウントを登録できませんでした。');
 	},
+	async confirmEmail(userId: string, token: string) {
+		const response = await post('/api/auth/confirm-email', { userId, token });
+		if (!response.ok) throw await responseError(response, 'メールアドレスを確認できませんでした。');
+	},
+	async resendConfirmation(email: string) {
+		const response = await post('/api/auth/resend-confirmation', { email });
+		if (!response.ok) throw await responseError(response, '再送を受け付けられませんでした。');
+		return (await response.json()).message as string;
+	},
 	async logout() {
 		// サーバー側で Cookie は既に削除されているため、通信自体が失敗しても
 		// ローカル状態は解除する(例外の有無にかかわらず finally で必ず実行)。

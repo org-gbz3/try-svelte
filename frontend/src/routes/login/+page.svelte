@@ -7,6 +7,18 @@
 	let password = $state('');
 	let error = $state('');
 	let submitting = $state(false);
+	let notice = $state('');
+
+	async function resend() {
+		if (submitting) return;
+		if (!email) { error = 'メールアドレスを入力してください'; return; }
+		submitting = true;
+		error = '';
+		notice = '';
+		try { notice = await auth.resendConfirmation(email); }
+		catch (cause) { error = cause instanceof Error ? cause.message : '再送に失敗しました。'; }
+		finally { submitting = false; }
+	}
 
 	$effect(() => {
 		if (auth.isLoggedIn) goto('/');
@@ -37,8 +49,10 @@
 	<div class="card">
 		<h1>ログイン</h1>
 		{#if page.url.searchParams.get("registered") === "1"}
-			<p role="status">アカウントを登録しました。ログインしてください。</p>
+			<p role="status">確認メールを送信しました。メール内のリンクで確認を完了してからログインしてください。</p>
 		{/if}
+		<p>メールアドレスの確認が完了するとログインできます。</p>
+		{#if notice}<p role="status">{notice}</p>{/if}
 		<form onsubmit={handleSubmit}>
 			<label>
 				メールアドレス
@@ -52,6 +66,7 @@
 				<p class="error" role="alert">{error}</p>
 			{/if}
 			<button type="submit" disabled={submitting}>ログイン</button>
+			<button type="button" onclick={resend} disabled={submitting}>確認メールを再送</button>
 		</form>
 		<p class="switch">アカウントをお持ちでない方は <a href="/signup">アカウント作成</a></p>
 	</div>

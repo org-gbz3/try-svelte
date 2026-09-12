@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using System.Net.Mail;
+using backend.Services;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -13,7 +15,9 @@ namespace backend.Controllers;
 [Route("api/auth")]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public class AuthController(UserManager<IdentityUser> users,
-    SignInManager<IdentityUser> signIn, IAntiforgery antiforgery) : ControllerBase
+    SignInManager<IdentityUser> signIn, IAntiforgery antiforgery,
+    IConfirmationEmailSender emailSender, ILogger<AuthController> logger,
+    IHostEnvironment environment) : ControllerBase
 {
     [HttpGet("csrf")]
     public IActionResult Csrf() => Ok(new
@@ -43,7 +47,62 @@ public class AuthController(UserManager<IdentityUser> users,
                 ? "パスワードは12文字以上で、大文字・小文字・数字・記号を含めてください。"
                 : "このメールアドレスでは登録できません。" });
         }
+        if (!await SendConfirmation(user))
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "アカウントは作成されましたが、確認メールを送信できませんでした。ログイン画面から再送してください。"
+            });
         return StatusCode(StatusCodes.Status201Created);
+    }
+
+    [EnableRateLimiting("auth")]
+    [HttpPost("confirm-email")]
+    public async Task<IActionResult> ConfirmEmail(Confirmation request)
+    {
+        var user = await users.FindByIdAsync(request.UserId);
+        if (user is null || !(await users.ConfirmEmailAsync(user, request.Token)).Succeeded)
+            return BadRequest(new { message = "確認リンクが無効か期限切れです。確認メールを再送してください。" });
+        return NoContent();
+    }
+
+    [EnableRateLimiting("auth")]
+    [HttpPost("resend-confirmation")]
+    public async Task<IActionResult> ResendConfirmation(EmailRequest request)
+    {
+        var user = await users.FindByEmailAsync(request.Email.Trim());
+        if (user is not null && !await users.IsEmailConfirmedAsync(user))
+            await SendConfirmation(user);
+        // 未登録・確認済み・配送失敗でも、アカウントの有無を応答で公開しない。
+        return Ok(new { message = "未確認のアカウントがある場合、確認メールを送信します。届かない場合は時間をおいて再試行してください。" });
+    }
+
+    private async Task<bool> SendConfirmation(IdentityUser user)
+    {
+        try
+        {
+            var token = await users.GenerateEmailConfirmationTokenAsync(user);
+            await emailSender.SendAsync(user.Email!, user.Id, token);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            var smtpStatus = exception is SmtpException smtp ? smtp.StatusCode.ToString() : "該当なし";
+            if (environment.IsDevelopment())
+            {
+                // SMTP 応答と内部例外が原因特定に必要なため、開発環境だけで詳細を記録する。
+                logger.LogError(exception,
+                    "確認メールの送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
+                    exception.GetType().Name, smtpStatus);
+            }
+            else
+            {
+                // SMTP 応答に宛先などが含まれる可能性があるため、本番では例外本文を記録しない。
+                logger.LogError(
+                    "確認メールの送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
+                    exception.GetType().Name, smtpStatus);
+            }
+            return false;
+        }
     }
 
     [EnableRateLimiting("auth")]
@@ -79,6 +138,12 @@ public class AuthController(UserManager<IdentityUser> users,
         await signIn.SignOutAsync();
         return NoContent();
     }
+
+    public sealed record Confirmation(
+        [Required, StringLength(128)] string UserId,
+        [Required, StringLength(4096)] string Token);
+
+    public sealed record EmailRequest([Required, EmailAddress, StringLength(254)] string Email);
 
     public sealed record Credentials(
         [Required, EmailAddress, StringLength(254)] string Email,
