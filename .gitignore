@@ -43,3 +43,4 @@ TestResults/
 
 # SvelteKit build output copied into backend/wwwroot at build time
 backend/wwwroot/
+backend/appsettings.Development.json
