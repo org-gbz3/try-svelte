@@ -7,6 +7,8 @@ SvelteKit(SPA)をビルドして `backend/wwwroot` に配備し、ASP.NET Core(.
 - `backend/` — ASP.NET Core Web API（Controllers ベース、.NET 10）。`wwwroot` に配置された静的ファイルを配信し、API は `api/` 配下。
 - `frontend/` — SvelteKit（`@sveltejs/adapter-static` によるSPAビルド）。ビルド出力は直接 `backend/wwwroot` へ書き出される。
 
+エージェント向けの実装・テスト作成ルールは [AGENTS.md](AGENTS.md) を参照する。
+
 ## Dev Container
 
 Docker Compose で開発用の `app` と SQL Server 2025 Developer の `sqlserver` を同時起動する。
@@ -153,6 +155,8 @@ Data Protection の鍵を保持しないと再起動後に既存リンクが無�
 
 ## ログイン機能
 
+ユーザー管理で最初に決める方針と、それによるアプリの挙動は [ASP.NET_Core_Identity.md](ASP.NET_Core_Identity.md) を参照する。
+
 ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メールを送信し、ログイン画面へ移動する。メール内のリンクを開き、確認ボタンを押すまでログインできない。
 パスワードは12〜128文字で、大文字・小文字・数字・記号をそれぞれ含める。
 ログイン失敗5回で15分間ロックアウトする。パスワード再設定・MFA は未実装。
@@ -202,7 +206,7 @@ npm --prefix frontend run build && dotnet run --project backend
 ```
 
 `dotnet test backend.Tests` は、各テストの確認内容を日本語の表示名で、成否・所要時間とともに出力する。
-各テストメソッドは1つの確認観点を扱い、個別のメモリ DB で独立して実行する。登録・ログインの準備処理はヘルパーにまとめる。
+テスト作成時のルールは [AGENTS.md の「テストを追加・変更するとき」](AGENTS.md#テストを追加変更するとき) を参照する。
 詳細ログが必要な場合は `dotnet test backend.Tests --logger "console;verbosity=detailed"` で上書きできる。
 
 統合テストは SQLite のメモリ DB と実際の Identity・Cookie・CSRF 処理を使用し、
