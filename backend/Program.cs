@@ -3,22 +3,40 @@ using backend.Data;
 using backend.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
+// 設定ファイル・環境変数・起動引数を共通の構成として利用する。
 var builder = WebApplication.CreateBuilder(args);
 
 // 標準の CSRF 認可フィルターに必要な MVC サービスを登録する。
 builder.Services.AddControllersWithViews(options =>
     options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()));
+
+// 開発時に API の仕様を確認できるよう OpenAPI の生成機能を登録する。
 builder.Services.AddOpenApi();
-builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
+
+// 不正な有効期限で稼働しないよう、確認メールの設定を起動時に検証する。
+builder.Services.AddOptions<EmailOptions>()
+    .Bind(builder.Configuration.GetSection("Email"))
+    .Validate(options => options.ConfirmationTokenLifespanMinutes > 0,
+        "Email:ConfirmationTokenLifespanMinutes は1以上の整数を設定してください。")
+    .ValidateOnStart();
+
+// メール配送を認証処理から分離し、SMTP 実装を差し替え可能にする。
 builder.Services.AddTransient<IConfirmationEmailSender, SmtpConfirmationEmailSender>();
-builder.Services.Configure<DataProtectionTokenProviderOptions>(options =>
-    options.TokenLifespan = TimeSpan.FromHours(24));
+
+// メール本文の案内と実際のトークン有効期限を同じ設定値に揃える。
+builder.Services.AddOptions<DataProtectionTokenProviderOptions>()
+    .Configure<IOptions<EmailOptions>>((options, emailOptions) =>
+        options.TokenLifespan = TimeSpan.FromMinutes(emailOptions.Value.ConfirmationTokenLifespanMinutes));
+
+// 認証情報を SQL Server に永続化し、接続文字列の未設定を検出する。
 builder.Services.AddDbContext<AuthDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("AuthDatabase")
         ?? throw new InvalidOperationException("ConnectionStrings:AuthDatabase を設定してください。")));
+
+// メール確認とパスワード要件・ロックアウトを Identity に統一して適用する。
 builder.Services.AddIdentity<IdentityUser, IdentityRole>(options =>
 {
     options.User.RequireUniqueEmail = true;
@@ -27,6 +45,8 @@ builder.Services.AddIdentity<IdentityUser, IdentityRole>(options =>
     options.Lockout.MaxFailedAccessAttempts = 5;
     options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
 }).AddEntityFrameworkStores<AuthDbContext>().AddDefaultTokenProviders();
+
+// 認証 Cookie の保護と有効期間を定め、SPA が扱える HTTP ステータスを返す。
 builder.Services.ConfigureApplicationCookie(options =>
 {
     options.Cookie.Name = "try-svelte.auth";
@@ -36,17 +56,23 @@ builder.Services.ConfigureApplicationCookie(options =>
         ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
     options.ExpireTimeSpan = TimeSpan.FromHours(8);
     options.SlidingExpiration = false;
+
+    // API の未認証応答がログインページへのリダイレクトにならないようにする。
     options.Events.OnRedirectToLogin = context =>
     {
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         return Task.CompletedTask;
     };
+
+    // SPA が権限不足と未認証を区別できるよう、拒否理由をステータスで伝える。
     options.Events.OnRedirectToAccessDenied = context =>
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         return Task.CompletedTask;
     };
 });
+
+// Cookie 認証を利用する更新 API を、別サイトからの不正なリクエストから保護する。
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = "X-CSRF-TOKEN";
@@ -56,6 +82,8 @@ builder.Services.AddAntiforgery(options =>
     options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
         ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
 });
+
+// 認証 API への過剰な試行を抑え、制限超過を HTTP 429 で通知する。
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -70,19 +98,41 @@ builder.Services.AddRateLimiter(options =>
         }));
 });
 
+// 登録済みのサービスと設定から、リクエストを処理するアプリを構築する。
 var app = builder.Build();
+
+// API 仕様の公開を開発環境に限定する。
 if (app.Environment.IsDevelopment()) app.MapOpenApi();
 
+// 平文 HTTP でのアクセスを HTTPS へ誘導する。
 app.UseHttpsRedirection();
+
+// ディレクトリへのアクセスで SPA の index.html を配信できるようにする。
 app.UseDefaultFiles();
+
+// ビルド済み SPA のファイルを ASP.NET Core から配信する。
 app.UseStaticFiles();
+
+// エンドポイントに指定した制限を、認証処理やコントローラーの実行前に適用する。
 app.UseRateLimiter();
+
+// 認可判定に先立ち、認証 Cookie から利用者を特定する。
 app.UseAuthentication();
+
+// エンドポイントの認可要件に従い、利用者のアクセスを判定する。
 app.UseAuthorization();
+
+// コントローラーで定義した API のルートを公開する。
 app.MapControllers();
+
 // API の誤った URL に SPA の HTML を返さない。
 app.MapFallback("/api/{**path}", () => Results.NotFound());
+
+// SPA 内の URL を直接開いた場合も、クライアント側のルーティングに委ねる。
 app.MapFallbackToFile("index.html");
+
+// ホストを起動し、終了要求までリクエストを受け付ける。
 app.Run();
 
+// 統合テストの WebApplicationFactory からエントリーポイントを参照可能にする。
 public partial class Program { }

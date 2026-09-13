@@ -8,6 +8,9 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
@@ -18,6 +21,40 @@ namespace backend.Tests;
 public class AuthTests
 {
     private const string Password = "Test-password-123!";
+
+    [Theory(DisplayName = "設定した確認メールの有効期限をIdentityに適用する")]
+    [InlineData(30)]
+    [InlineData(1440)]
+    public void ConfirmationLifespanUsesConfiguration(int minutes)
+    {
+        using var factory = new AuthFactory();
+        using var configured = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Email:ConfirmationTokenLifespanMinutes"] = minutes.ToString()
+                })));
+        using var client = configured.CreateClient();
+        Assert.Equal(TimeSpan.FromMinutes(minutes), configured.Services
+            .GetRequiredService<IOptions<DataProtectionTokenProviderOptions>>().Value.TokenLifespan);
+        Assert.Equal(minutes, configured.Services
+            .GetRequiredService<IOptions<EmailOptions>>().Value.ConfirmationTokenLifespanMinutes);
+    }
+
+    [Theory(DisplayName = "確認メールの有効期限が0以下なら起動を拒否する")]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void ConfirmationLifespanRejectsInvalidConfiguration(int minutes)
+    {
+        using var factory = new AuthFactory();
+        using var configured = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Email:ConfirmationTokenLifespanMinutes"] = minutes.ToString()
+                })));
+        Assert.Throws<OptionsValidationException>(() => configured.CreateClient());
+    }
 
     [Fact(DisplayName = "未ログインではユーザー情報を取得できない")]
     public async Task MeRejectsAnonymousUser()

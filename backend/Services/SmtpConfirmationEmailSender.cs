@@ -7,6 +7,7 @@ namespace backend.Services;
 public sealed class EmailOptions
 {
     public string PublicBaseUrl { get; set; } = "";
+    public int ConfirmationTokenLifespanMinutes { get; set; } = 1440;
     public string Host { get; set; } = "";
     public int Port { get; set; } = 587;
     public bool EnableSsl { get; set; } = true;
@@ -38,7 +39,7 @@ public sealed class SmtpConfirmationEmailSender(IOptions<EmailOptions> options,
         using var message = new MailMessage(settings.From, email)
         {
             Subject = "メールアドレスの確認",
-            Body = $"以下のリンクを開き、メールアドレスの確認ボタンを押してください。リンクの有効期限は24時間です。\n\n{link}\n\n心当たりがない場合は、このメールを破棄してください。"
+            Body = $"以下のリンクを開き、メールアドレスの確認ボタンを押してください。リンクの有効期限は発行から{settings.ConfirmationTokenLifespanMinutes}分です。\n\n{link}\n\n心当たりがない場合は、このメールを破棄してください。"
         };
         using var client = new SmtpClient(settings.Host, settings.Port)
         {
