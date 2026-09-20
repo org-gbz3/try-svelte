@@ -9,6 +9,7 @@
 - 開発・ビルド手順は README.md を参照する。
 - frontend 配下を変更する前に、frontend/AGENTS.md が存在する場合は読む。
 - backend 配下を変更する前に、backend/AGENTS.md が存在する場合は読む。
+- 方針・仕様の変更に着手する前に、関連する過去の検討経緯が decisions/ にないか確認する。
 
 ## 共通コーディング規約
 
@@ -36,6 +37,12 @@
 - 本番の認証・CSRF Cookie の Secure 設定と HTTPS 配信を維持する。Data Protection の鍵は永続化し、複数インスタンスでは共有する構成にする。
 - 通常の `dotnet build` / `dotnet run` はフロントエンドをビルドしない。配備確認には通常の `dotnet publish backend -c Release` を使用し、`--no-build` で再生成を省略しない。
 - CSP は `frontend/vite.config.ts` で管理し、アプリのスタイルには CSS クラスを使う。SvelteKit 更新で `svelte-announcer` のインラインスタイルが変わった場合は、実際の内容に合わせて許可ハッシュを更新する。
+
+## 方針・仕様を決定するとき
+
+- トレードオフのある方針判断や、複数案から選定したときは、経緯を [decisions/](decisions/README.md) に ADR として追加する。些末な実装の言い換えは対象外。
+- 既存の決定を覆す場合は新しい ADR を追加し、旧 ADR の内容は書き換えずに状態を「廃止・置換」にして新旧を相互リンクする。
+- ADR は経緯の記録であり、現時点の仕様の正ではない。現時点の仕様は README.md や ASP.NET_Core_Identity.md など既存の文書側に反映する。
 
 ## テストを追加・変更するとき
 
