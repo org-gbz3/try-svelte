@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { auth } from '$lib/auth.svelte';
+	import { auth, PermissionLevel } from '$lib/auth.svelte';
 
 	$effect(() => {
 		if (auth.status === 'anonymous') goto('/login');
@@ -29,6 +29,9 @@
 		<div class="card">
 			<h1>トップ画面</h1>
 			<p>{auth.user?.email} でログイン中です。</p>
+			{#if auth.hasPermission('Admin.Roles', PermissionLevel.Read)}
+				<a href="/admin/roles">ロール管理</a>
+			{/if}
 			<button onclick={handleLogout} disabled={submitting}>ログアウト</button>
 			{#if error}<p role="alert">{error}</p>{/if}
 		</div>
@@ -56,6 +59,10 @@
 	p {
 		margin: 0;
 		color: var(--color-neutral-700);
+	}
+
+	a {
+		color: var(--color-primary);
 	}
 
 	button {

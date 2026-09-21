@@ -1,9 +1,9 @@
+using backend.Authorization;
+using backend.Data;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 
 namespace backend.Controllers;
 
-[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class WeatherForecastController : ControllerBase
@@ -13,6 +13,8 @@ public class WeatherForecastController : ControllerBase
         "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
     ];
 
+    [PermissionKey("WeatherForecast.Get", "天気予報の取得")]
+    [RequirePermission("WeatherForecast.Get", PermissionLevel.Read)]
     [HttpGet(Name = "GetWeatherForecast")]
     public IEnumerable<WeatherForecast> Get()
     {

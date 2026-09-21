@@ -6,6 +6,7 @@ SvelteKit(SPA)をビルドして `backend/wwwroot` に配備し、ASP.NET Core(.
 
 - `backend/` — ASP.NET Core Web API（Controllers ベース、.NET 10）。`wwwroot` に配置された静的ファイルを配信し、API は `api/` 配下。
 - `frontend/` — SvelteKit（`@sveltejs/adapter-static` によるSPAビルド）。ビルド出力は直接 `backend/wwwroot` へ書き出される。
+- `decisions/` — 方針・仕様を検討した経緯（ADR）。現時点の仕様そのものはこの README や [ASP.NET_Core_Identity.md](ASP.NET_Core_Identity.md) 側に記載し、`decisions/` にはなぜその決定に至ったかを記録する。詳細は [decisions/README.md](decisions/README.md) を参照。
 
 エージェント向けの実装・テスト作成ルールは [AGENTS.md](AGENTS.md) を参照する。
 
@@ -167,9 +168,61 @@ ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メ�
 | `POST /api/auth/register` | `{ email, password }` で登録。成功 `201`、入力不備・登録不可 `400` |
 | `POST /api/auth/confirm-email` | `{ userId, token }` で確認。成功 `204`、無効・期限切れ `400` |
 | `POST /api/auth/resend-confirmation` | `{ email }` で再送。未登録・確認済みも同じ `200` 応答 |
-| `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email }`、認証失敗 `401` |
-| `GET /api/auth/me` | 認証済みなら `200` と `{ id, email }`、未認証なら `401` |
+| `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email, permissions }`、認証失敗 `401` |
+| `GET /api/auth/me` | 認証済みなら `200` と `{ id, email, permissions }`、未認証なら `401` |
 | `POST /api/auth/logout` | Cookie を削除し `204` |
+
+`permissions` は、ログイン中ユーザーが保持する全ロールの実効権限を `{ アクションキー: レベル }` の形で表したマップ
+(レベルは `PermissionLevel` の数値、None=0/Read=1/Write=2。権限を持たないアクションキーはキー自体を省略する)。
+フロントエンドはこれを使ってナビゲーションの表示を権限に応じて出し分けるが、あくまでUXのためであり、各APIの
+`[Authorize]`/`[RequirePermission]` による保護とは独立している。経緯は
+[decisions/0003-expose-effective-permissions-in-me.md](decisions/0003-expose-effective-permissions-in-me.md) を参照する。
+
+## 認可(ロール・権限)
+
+ロールベースの認可方針は [ASP.NET_Core_Identity.md](ASP.NET_Core_Identity.md) の「6. 認証後に何を許可するか」と
+[decisions/0001-role-based-authorization-design.md](decisions/0001-role-based-authorization-design.md) を参照する。
+
+ロールの実体・ユーザーへの割り当ては ASP.NET Core Identity の標準ロール機能(`AspNetRoles`/`AspNetUserRoles`)を使う。
+1人のユーザーは複数のロールを同時に持て、実効権限は保持する全ロールの権限レベルの最大値になる。
+「管理者」という特別なロール名は存在せず、`Admin.Roles`/`Admin.UserRoles` への書き込み権限を持つことがそのまま管理者権限になる。
+非管理者は自分自身を含め誰のロールも変更できない(これらの権限を持たないため)。
+
+APIアクションには `[PermissionKey]` で権限キーを、`[RequirePermission]` で必要な権限レベル(`Read`/`Write`、`Write` は
+`Read` を含む)を宣言する。権限キーごとのロールの権限レベルは `RolePermissions` テーブルに持ち、リクエストのたびに
+DB を参照して判定するため、Cookie に権限情報は載らず、ロール・権限の変更は既存のログインセッションに即時反映される。
+起動時に、コード上の `[PermissionKey]` が `PermissionActions` テーブルへ自動同期される(削除されたキーは自動削除しない)。
+
+| API | 動作 |
+| --- | --- |
+| `GET /api/admin/roles` | ロール一覧とロールごとの権限を取得(`Admin.Roles` の `Read`) |
+| `GET /api/admin/roles/permission-actions` | 権限キーのカタログを取得(`Admin.Roles` の `Read`) |
+| `POST /api/admin/roles` | `{ name }` でロールを作成(`Admin.Roles` の `Write`) |
+| `PUT /api/admin/roles/{roleId}` | ロール名を変更(`Admin.Roles` の `Write`) |
+| `DELETE /api/admin/roles/{roleId}` | ロールを削除(`Admin.Roles` の `Write`) |
+| `PUT /api/admin/roles/{roleId}/permissions` | `{ permissions: [{ actionKey, level }] }` でロールの権限を一括更新(`Admin.Roles` の `Write`) |
+| `GET /api/admin/users/{userId}/roles` | 指定ユーザーの保持ロールを取得(`Admin.UserRoles` の `Read`) |
+| `PUT /api/admin/users/{userId}/roles` | `{ roles: [...] }` でユーザーのロールを置き換え(`Admin.UserRoles` の `Write`) |
+
+フロントエンドの管理画面は `/admin/roles`(ロールの一覧・作成・名称変更・削除・権限マトリクス編集)のみ実装している。
+トップ画面には `Admin.Roles` の `Read` 権限を持つ場合のみこの画面へのリンクを表示するが、直接URLを開かれた場合に
+備えて画面側でも `403` 応答を検出し「権限がありません」と案内する。ユーザーへのロール割り当て(`/api/admin/users/{userId}/roles`)
+を操作する画面は、ユーザーを検索するAPIが無いため未実装のまま。
+
+### 最初の管理者のブートストラップ
+
+`Admin:Bootstrap:Email`/`Admin:Bootstrap:Password` を設定すると、起動時に最初の管理者アカウントを自動作成する。
+`Admin.Roles` への `Write` 権限を持つロールが既に存在する場合は何もしないため、何度起動しても安全。
+未設定(空欄)の場合もブートストラップは実行されない。
+
+```sh
+dotnet user-secrets set "Admin:Bootstrap:Email" "admin@example.com" --project backend
+dotnet user-secrets set "Admin:Bootstrap:Password" "初期パスワード" --project backend
+```
+
+`backend/appsettings.Development.json` には `Admin:Bootstrap:Email` の既定値のみを設定しており、パスワードは
+設定ファイルに直接書かず、上記のように User Secrets(または環境変数 `Admin__Bootstrap__Password`)で指定する
+方針にしている(`Email:Password` の Resend API キーと同じ扱い)。作成されるアカウントはメール確認不要でログインできる。
 
 更新 API は直前に `/api/auth/csrf` を呼び、返却されたトークンを `X-CSRF-TOKEN` ヘッダーに設定する。
 Cookie も同時に送信する。CSRF トークンなし・不正なトークンは `400`。
@@ -200,6 +253,9 @@ npm --prefix frontend run test
 dotnet build backend
 dotnet test backend.Tests
 dotnet publish backend -c Release
+
+# マイグレーション適用
+dotnet ef database update --project backend
 
 # ワンライナーで起動
 npm --prefix frontend run build && dotnet run --project backend

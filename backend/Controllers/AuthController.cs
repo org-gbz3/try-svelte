@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Net.Mail;
+using backend.Authorization;
+using backend.Data;
 using backend.Services;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
@@ -17,7 +19,7 @@ namespace backend.Controllers;
 public class AuthController(UserManager<IdentityUser> users,
     SignInManager<IdentityUser> signIn, IAntiforgery antiforgery,
     IConfirmationEmailSender emailSender, ILogger<AuthController> logger,
-    IHostEnvironment environment) : ControllerBase
+    IHostEnvironment environment, AuthDbContext db) : ControllerBase
 {
     [HttpGet("csrf")]
     public IActionResult Csrf() => Ok(new
@@ -115,7 +117,7 @@ public class AuthController(UserManager<IdentityUser> users,
             : await signIn.PasswordSignInAsync(user, request.Password, isPersistent: false, lockoutOnFailure: true);
         if (!result.Succeeded)
             return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
-        return Ok(new { id = user!.Id, email = user.Email });
+        return Ok(new { id = user!.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
     }
 
     [Authorize]
@@ -128,7 +130,17 @@ public class AuthController(UserManager<IdentityUser> users,
             await signIn.SignOutAsync();
             return Unauthorized();
         }
-        return Ok(new { id = user.Id, email = user.Email });
+        return Ok(new { id = user.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
+    }
+
+    // ログイン中ユーザーが保持する全ロールの実効権限(アクションキー→最大レベル)。
+    // フロントエンドがナビ表示を権限で出し分けられるよう /login・/me の両方で返す(decisions/0003参照)。
+    private async Task<Dictionary<string, PermissionLevel>> EffectivePermissionsAsync(string userId)
+    {
+        var levels = await PermissionQueries.ForUser(db, userId).ToListAsync();
+        return levels
+            .GroupBy(permission => permission.ActionKey)
+            .ToDictionary(group => group.Key, group => group.Max(permission => permission.Level));
     }
 
     // 期限切れ後でもブラウザーの Cookie を削除できるよう匿名アクセスを許可する。
