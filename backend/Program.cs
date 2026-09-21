@@ -28,6 +28,10 @@ builder.Services.AddOptions<EmailOptions>()
 // メール配送を認証処理から分離し、SMTP 実装を差し替え可能にする。
 builder.Services.AddTransient<IConfirmationEmailSender, SmtpConfirmationEmailSender>();
 
+// 最初の管理者アカウントのブートストラップ設定。未設定なら何もしない(下記 AdminBootstrap 参照)。
+builder.Services.AddOptions<AdminBootstrapOptions>()
+    .Bind(builder.Configuration.GetSection("Admin:Bootstrap"));
+
 // メール本文の案内と実際のトークン有効期限を同じ設定値に揃える。
 builder.Services.AddOptions<DataProtectionTokenProviderOptions>()
     .Configure<IOptions<EmailOptions>>((options, emailOptions) =>
@@ -142,6 +146,10 @@ app.MapFallbackToFile("index.html");
 // コード上の [PermissionKey] を PermissionActions テーブルへ同期する。
 // スキーマ変更ではなくデータ同期のため、マイグレーションの事前適用方針とは別に起動時に実行する。
 await PermissionActionSync.RunAsync(app.Services);
+
+// 最初の管理者アカウントをブートストラップする(Admin.Roles を持つロールが既にあれば何もしない)。
+// Admin.Roles の PermissionAction 行が必要なため、PermissionActionSync より後に実行する。
+await AdminBootstrap.RunAsync(app.Services);
 
 // ホストを起動し、終了要求までリクエストを受け付ける。
 app.Run();

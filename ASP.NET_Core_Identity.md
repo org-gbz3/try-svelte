@@ -99,7 +99,7 @@ Cookie 認証では、`SameSite` の設定だけに依存せず更新 API に CS
 | MFA 端末を紛失した場合 | 回復コード等の代替手段、本人確認を伴うサポート手順 |
 | 利用停止と退会 | 新規ログインと既存セッションの拒否、データの削除・保持・匿名化、同じメールでの再登録可否 |
 | Google などの外部ログイン | 外部アカウントとの関連付け、同じメールの既存ユーザーとの統合条件、外部サービスが使えない場合の復旧 |
-| 管理者による操作 | 最初の管理者の作成方法(ブートストラップ)は未実装・未決定。権限を付与できる人は「ロール管理API(`Admin.Roles`/`Admin.UserRoles`)への `Write` 権限を持つこと」で定義済み(特別な管理者ロール名はない)。操作履歴(監査ログ)・誤操作からの復旧は未実装 |
+| 管理者による操作 | 最初の管理者は `Admin:Bootstrap:Email`/`Admin:Bootstrap:Password` の設定により起動時に自動作成する(README.mdの「最初の管理者のブートストラップ」参照)。`Admin.Roles` への `Write` 権限を持つロールが既にあれば何もしない。権限を付与できる人は「ロール管理API(`Admin.Roles`/`Admin.UserRoles`)への `Write` 権限を持つこと」で定義済み(特別な管理者ロール名はない)。操作履歴(監査ログ)・誤操作からの復旧は未実装 |
 
 外部ログインなどは Identity が扱える機能だが、独自 API を使うこのアプリには、それぞれの操作経路と画面を追加する必要がある。[Microsoft Learn: Identity が扱う機能](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/identity?view=aspnetcore-10.0)
 

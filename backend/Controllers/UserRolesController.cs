@@ -11,7 +11,7 @@ namespace backend.Controllers;
 [ApiController]
 [Route("api/admin/users/{userId}/roles")]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
-public class UserRolesController(UserManager<IdentityUser> userManager) : ControllerBase
+public class UserRolesController(UserManager<IdentityUser> userManager, AuthDbContext db) : ControllerBase
 {
     [PermissionKey("Admin.UserRoles", "ユーザーへのロール割り当て")]
     [RequirePermission("Admin.UserRoles", PermissionLevel.Read)]
@@ -37,6 +37,11 @@ public class UserRolesController(UserManager<IdentityUser> userManager) : Contro
 
         var toRemove = current.Except(requested).ToList();
         var toAdd = requested.Except(current).ToList();
+        if (toRemove.Count == 0 && toAdd.Count == 0) return NoContent();
+
+        // RemoveFromRolesAsync/AddToRolesAsync はそれぞれ内部で個別に SaveChanges するため、
+        // 明示的なトランザクションで包み、片方だけ成功してロールが中途半端な状態になるのを防ぐ(decisions/0002参照)。
+        await using var transaction = await db.Database.BeginTransactionAsync();
 
         if (toRemove.Count > 0)
         {
@@ -50,6 +55,8 @@ public class UserRolesController(UserManager<IdentityUser> userManager) : Contro
             if (!addResult.Succeeded)
                 return BadRequest(new { message = "存在しないロールが含まれています。" });
         }
+
+        await transaction.CommitAsync();
         return NoContent();
     }
 

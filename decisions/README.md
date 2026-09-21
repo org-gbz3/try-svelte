@@ -46,3 +46,4 @@
 | 番号 | タイトル | 状態 |
 | --- | --- | --- |
 | [0001](0001-role-based-authorization-design.md) | ロールベース認可の実装方式 | 採用 |
+| [0002](0002-explicit-transactions-for-multi-step-writes.md) | 複数保存ポイントを持つDB書き込みの明示的トランザクション化 | 採用 |

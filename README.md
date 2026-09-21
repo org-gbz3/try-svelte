@@ -199,7 +199,21 @@ DB を参照して判定するため、Cookie に権限情報は載らず、ロ�
 | `PUT /api/admin/users/{userId}/roles` | `{ roles: [...] }` でユーザーのロールを置き換え(`Admin.UserRoles` の `Write`) |
 
 現時点ではこれらの管理APIのみを実装しており、ロール・権限を編集するフロントエンドの管理画面は未実装。
-最初の管理者アカウントの作成方法(ブートストラップ)も未実装で、別途決定する。
+
+### 最初の管理者のブートストラップ
+
+`Admin:Bootstrap:Email`/`Admin:Bootstrap:Password` を設定すると、起動時に最初の管理者アカウントを自動作成する。
+`Admin.Roles` への `Write` 権限を持つロールが既に存在する場合は何もしないため、何度起動しても安全。
+未設定(空欄)の場合もブートストラップは実行されない。
+
+```sh
+dotnet user-secrets set "Admin:Bootstrap:Email" "admin@example.com" --project backend
+dotnet user-secrets set "Admin:Bootstrap:Password" "初期パスワード" --project backend
+```
+
+`backend/appsettings.Development.json` には `Admin:Bootstrap:Email` の既定値のみを設定しており、パスワードは
+設定ファイルに直接書かず、上記のように User Secrets(または環境変数 `Admin__Bootstrap__Password`)で指定する
+方針にしている(`Email:Password` の Resend API キーと同じ扱い)。作成されるアカウントはメール確認不要でログインできる。
 
 更新 API は直前に `/api/auth/csrf` を呼び、返却されたトークンを `X-CSRF-TOKEN` ヘッダーに設定する。
 Cookie も同時に送信する。CSRF トークンなし・不正なトークンは `400`。

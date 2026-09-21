@@ -29,6 +29,14 @@
 - 確認トークンの有効期限とメール本文の説明には、同じ `Email:ConfirmationTokenLifespanMinutes` の設定値を使用する。
 - 確認メールの再送応答から、未登録・確認済みなどのアカウント状態を判別できないようにする。
 
+## DB更新処理を実装するとき
+
+- ASP.NET Core Identity の `UserManager`/`RoleManager` の各メソッド(`CreateAsync`・`AddToRoleAsync` 等)は呼び出しごとに
+  内部で `SaveChangesAsync()` を自動実行する。1つの論理操作の中でこれらの呼び出しや `SaveChangesAsync()` を2回以上行う場合は、
+  `AuthDbContext.Database.BeginTransactionAsync()` で明示的に囲み、途中で失敗したときに全体がロールバックされるようにする。
+  1回の `SaveChangesAsync()` で完結する操作(複数エンティティの追加・削除でも1回にまとめられるもの)には不要で、
+  EF Core の暗黙トランザクションで既にアトミック。経緯は [decisions/0002](decisions/0002-explicit-transactions-for-multi-step-writes.md) を参照する。
+
 ## 設定・データ・配備を変更するとき
 
 - 実際のパスワード・API キー・秘密を含む接続文字列は Git 管理対象のファイルに保存せず、環境変数または User Secrets を使用する。設定例にはプレースホルダーを使う。
