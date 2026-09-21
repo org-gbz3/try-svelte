@@ -164,6 +164,31 @@ public class AuthorizationTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    [Fact(DisplayName = "/api/auth/me はログイン中ユーザーの実効権限マップを返す")]
+    public async Task MeReturnsEffectivePermissions()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, userId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(userId, "role-admin", "Admin.Roles", PermissionLevel.Write);
+
+        using var response = await client.GetAsync("/api/auth/me");
+        var body = await response.Content.ReadFromJsonAsync<MeResponse>();
+        Assert.Equal(PermissionLevel.Write, body!.Permissions["Admin.Roles"]);
+    }
+
+    [Fact(DisplayName = "ロールを持たないユーザーの/api/auth/meの権限マップは空")]
+    public async Task MeReturnsEmptyPermissionsWithoutRoles()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+
+        using var response = await client.GetAsync("/api/auth/me");
+        var body = await response.Content.ReadFromJsonAsync<MeResponse>();
+        Assert.Empty(body!.Permissions);
+    }
+
     [Fact(DisplayName = "起動時にコード上の[PermissionKey]がPermissionActionsへ同期される")]
     public async Task StartupSyncsPermissionActions()
     {
@@ -210,6 +235,7 @@ public class AuthorizationTests
 
     private record Credentials(string Email, string Password);
     private record Csrf(string Token);
+    private record MeResponse(string Id, string Email, Dictionary<string, PermissionLevel> Permissions);
 
     private sealed class RecordingEmailSender : IConfirmationEmailSender
     {

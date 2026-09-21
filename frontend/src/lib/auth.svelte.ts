@@ -1,11 +1,15 @@
-type User = { id: string; email: string };
+// バックエンドの PermissionLevel(backend/Data/PermissionLevel.cs)と同じ数値。JSON上も数値でやり取りする。
+export const PermissionLevel = { None: 0, Read: 1, Write: 2 } as const;
+export type PermissionLevel = (typeof PermissionLevel)[keyof typeof PermissionLevel];
+
+type User = { id: string; email: string; permissions: Record<string, PermissionLevel> };
 type AuthStatus = 'checking' | 'authenticated' | 'anonymous' | 'error';
 
 let user = $state<User | null>(null);
 let status = $state<AuthStatus>('checking');
 let pendingCheck: Promise<void> | null = null;
 
-async function responseError(response: Response, fallback: string): Promise<Error> {
+export async function responseError(response: Response, fallback: string): Promise<Error> {
 	const body = await response.json().catch(() => null);
 	return new Error(body?.message ?? fallback);
 }
@@ -21,23 +25,34 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
 	return response;
 }
 
-async function post(path: string, body?: unknown): Promise<Response> {
-	// ログイン前後でトークンの対象ユーザーが変わるため、更新操作の直前に取得する。
+// CSRF対策付きの更新API呼び出し。ログイン前後でトークンの対象ユーザーが変わるため、呼び出しの直前に取得する。
+export async function csrfRequest(
+	path: string,
+	method: 'POST' | 'PUT' | 'DELETE',
+	body?: unknown
+): Promise<Response> {
 	const csrf = await apiFetch('/api/auth/csrf');
 	if (!csrf.ok) throw new Error('認証の準備に失敗しました。再試行してください。');
 	const { token } = await csrf.json().catch(() => ({ token: undefined }));
 	if (!token) throw new Error('認証の準備に失敗しました。再試行してください。');
 	return apiFetch(path, {
-		method: 'POST',
+		method,
 		headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': token },
 		body: body === undefined ? undefined : JSON.stringify(body)
 	});
+}
+
+async function post(path: string, body?: unknown): Promise<Response> {
+	return csrfRequest(path, 'POST', body);
 }
 
 export const auth = {
 	get user() { return user; },
 	get status() { return status; },
 	get isLoggedIn() { return status === 'authenticated'; },
+	hasPermission(actionKey: string, level: PermissionLevel): boolean {
+		return (user?.permissions[actionKey] ?? PermissionLevel.None) >= level;
+	},
 	check(): Promise<void> {
 		if (pendingCheck) return pendingCheck;
 		status = 'checking';

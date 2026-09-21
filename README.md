@@ -168,9 +168,15 @@ ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メ�
 | `POST /api/auth/register` | `{ email, password }` で登録。成功 `201`、入力不備・登録不可 `400` |
 | `POST /api/auth/confirm-email` | `{ userId, token }` で確認。成功 `204`、無効・期限切れ `400` |
 | `POST /api/auth/resend-confirmation` | `{ email }` で再送。未登録・確認済みも同じ `200` 応答 |
-| `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email }`、認証失敗 `401` |
-| `GET /api/auth/me` | 認証済みなら `200` と `{ id, email }`、未認証なら `401` |
+| `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email, permissions }`、認証失敗 `401` |
+| `GET /api/auth/me` | 認証済みなら `200` と `{ id, email, permissions }`、未認証なら `401` |
 | `POST /api/auth/logout` | Cookie を削除し `204` |
+
+`permissions` は、ログイン中ユーザーが保持する全ロールの実効権限を `{ アクションキー: レベル }` の形で表したマップ
+(レベルは `PermissionLevel` の数値、None=0/Read=1/Write=2。権限を持たないアクションキーはキー自体を省略する)。
+フロントエンドはこれを使ってナビゲーションの表示を権限に応じて出し分けるが、あくまでUXのためであり、各APIの
+`[Authorize]`/`[RequirePermission]` による保護とは独立している。経緯は
+[decisions/0003-expose-effective-permissions-in-me.md](decisions/0003-expose-effective-permissions-in-me.md) を参照する。
 
 ## 認可(ロール・権限)
 
@@ -198,7 +204,10 @@ DB を参照して判定するため、Cookie に権限情報は載らず、ロ�
 | `GET /api/admin/users/{userId}/roles` | 指定ユーザーの保持ロールを取得(`Admin.UserRoles` の `Read`) |
 | `PUT /api/admin/users/{userId}/roles` | `{ roles: [...] }` でユーザーのロールを置き換え(`Admin.UserRoles` の `Write`) |
 
-現時点ではこれらの管理APIのみを実装しており、ロール・権限を編集するフロントエンドの管理画面は未実装。
+フロントエンドの管理画面は `/admin/roles`(ロールの一覧・作成・名称変更・削除・権限マトリクス編集)のみ実装している。
+トップ画面には `Admin.Roles` の `Read` 権限を持つ場合のみこの画面へのリンクを表示するが、直接URLを開かれた場合に
+備えて画面側でも `403` 応答を検出し「権限がありません」と案内する。ユーザーへのロール割り当て(`/api/admin/users/{userId}/roles`)
+を操作する画面は、ユーザーを検索するAPIが無いため未実装のまま。
 
 ### 最初の管理者のブートストラップ
 
