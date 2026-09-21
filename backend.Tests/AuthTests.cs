@@ -196,14 +196,25 @@ public class AuthTests
         Assert.True(response.Headers.CacheControl?.NoStore);
     }
 
-    [Fact(DisplayName = "ログイン後は保護されたAPIにアクセスできる")]
+    [Fact(DisplayName = "ログイン後、対象APIの権限を持つロールがあれば保護されたAPIにアクセスできる")]
     public async Task ProtectedApiAcceptsAuthenticatedUser()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await RegisterAndLogin(client, factory);
+        await factory.GrantWeatherForecastReadAsync(credentials.Email);
+        using var response = await client.GetAsync("/api/weatherforecast");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "ログイン済みでも対象APIの権限を持つロールがなければ保護されたAPIにアクセスできない")]
+    public async Task ProtectedApiRejectsAuthenticatedUserWithoutPermission()
     {
         using var factory = new AuthFactory();
         using var client = factory.CreateClient();
         await RegisterAndLogin(client, factory);
         using var response = await client.GetAsync("/api/weatherforecast");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact(DisplayName = "ログアウト時にCSRFトークンがなければ拒否する")]
@@ -481,6 +492,28 @@ public class AuthTests
                 using var scope = provider.CreateScope();
                 scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.EnsureCreated();
             });
+        }
+
+        // ロールベースの認可(AuthorizationTests参照)とは独立に、Cookie認証だけを検証したいテスト向けのショートカット。
+        public async Task GrantWeatherForecastReadAsync(string email)
+        {
+            using var scope = Services.CreateScope();
+            var provider = scope.ServiceProvider;
+            var users = provider.GetRequiredService<UserManager<IdentityUser>>();
+            var roles = provider.GetRequiredService<RoleManager<IdentityRole>>();
+            var db = provider.GetRequiredService<AuthDbContext>();
+
+            var user = await users.FindByEmailAsync(email) ?? throw new InvalidOperationException("ユーザーが見つかりません。");
+            var role = new IdentityRole("weather-reader");
+            await roles.CreateAsync(role);
+            await users.AddToRoleAsync(user, role.Name!);
+
+            var actionId = await db.PermissionActions
+                .Where(action => action.ActionKey == "WeatherForecast.Get")
+                .Select(action => action.Id)
+                .SingleAsync();
+            db.RolePermissions.Add(new RolePermission { RoleId = role.Id, PermissionActionId = actionId, Level = PermissionLevel.Read });
+            await db.SaveChangesAsync();
         }
 
         protected override void Dispose(bool disposing)

@@ -81,12 +81,12 @@ Cookie 認証では、`SameSite` の設定だけに依存せず更新 API に CS
 
 | 最初に決めること | 選択によるアプリの挙動 | このアプリの現状 |
 | --- | --- | --- |
-| ログインだけで利用可能か | `[Authorize]` で認証済み利用者に限定する | `/api/auth/me` と天気 API などを保護 |
-| 管理者・一般利用者などのロール | 管理者専用操作にはロール等の認可条件が必要 | `IdentityRole` は登録済みだが、ロール割り当て・管理画面は未実装 |
+| ログインだけで利用可能か | `[Authorize]` で認証済み利用者に限定する | `/api/auth/me` を保護。他の保護対象APIはロール・権限による判定に移行(下記) |
+| 管理者・一般利用者などのロール | 管理者専用操作にはロール等の認可条件が必要 | ロールベースの認可を実装。`[PermissionKey]`/`[RequirePermission]` でAPIアクション単位に権限キーと必要レベル(`Read`/`Write`)を宣言し、ロールごとの権限レベルを `RolePermissions` テーブルで管理する。詳細は [decisions/0001-role-based-authorization-design.md](decisions/0001-role-based-authorization-design.md) と [README.md の「認可(ロール・権限)」](README.md#認可ロール権限) を参照 |
 | 所有者や組織単位の権限 | 他人・別組織の ID を指定してもアクセスできないよう、対象データごとに確認する | 業務上の所有者・組織認可は今後の設計事項 |
-| 権限変更の反映時期 | ログイン時点の権限を保持する設計なら、変更後の再評価やチケット更新が必要 | 権限変更フローは未実装 |
+| 権限変更の反映時期 | ログイン時点の権限を保持する設計なら、変更後の再評価やチケット更新が必要 | 権限情報をCookieに一切載せず、リクエストのたびにDBを参照して判定するため、ロール・権限の変更は既存のログインセッションに即時反映される |
 
-画面のボタンを隠すだけでは API を保護できない。ロール・ポリシーなどの条件をサーバーでも適用する。このアプリでは未認証を `401`、権限不足を `403` とし、SPA は両者を区別する。[Microsoft Learn: ロールによる認可](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/secure-net-microservices-web-applications/authorization-net-microservices-web-applications)
+画面のボタンを隠すだけでは API を保護できない。ロール・ポリシーなどの条件をサーバーでも適用する。このアプリでは未認証を `401`、権限不足を `403` とし、SPA は両者を区別する。この振り分けは Cookie 認証イベント(`OnRedirectToLogin`/`OnRedirectToAccessDenied`)がロールベースの認可でもそのまま適用される。[Microsoft Learn: ロールによる認可](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/secure-net-microservices-web-applications/authorization-net-microservices-web-applications)
 
 ## 7. 変更・復旧・退会と外部ログイン
 
@@ -99,7 +99,7 @@ Cookie 認証では、`SameSite` の設定だけに依存せず更新 API に CS
 | MFA 端末を紛失した場合 | 回復コード等の代替手段、本人確認を伴うサポート手順 |
 | 利用停止と退会 | 新規ログインと既存セッションの拒否、データの削除・保持・匿名化、同じメールでの再登録可否 |
 | Google などの外部ログイン | 外部アカウントとの関連付け、同じメールの既存ユーザーとの統合条件、外部サービスが使えない場合の復旧 |
-| 管理者による操作 | 最初の管理者の作成方法、権限を付与できる人、操作履歴、誤操作からの復旧 |
+| 管理者による操作 | 最初の管理者の作成方法(ブートストラップ)は未実装・未決定。権限を付与できる人は「ロール管理API(`Admin.Roles`/`Admin.UserRoles`)への `Write` 権限を持つこと」で定義済み(特別な管理者ロール名はない)。操作履歴(監査ログ)・誤操作からの復旧は未実装 |
 
 外部ログインなどは Identity が扱える機能だが、独自 API を使うこのアプリには、それぞれの操作経路と画面を追加する必要がある。[Microsoft Learn: Identity が扱う機能](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/identity?view=aspnetcore-10.0)
 

@@ -1,6 +1,8 @@
 using System.Threading.RateLimiting;
+using backend.Authorization;
 using backend.Data;
 using backend.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -45,6 +47,12 @@ builder.Services.AddIdentity<IdentityUser, IdentityRole>(options =>
     options.Lockout.MaxFailedAccessAttempts = 5;
     options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
 }).AddEntityFrameworkStores<AuthDbContext>().AddDefaultTokenProviders();
+
+// ロールが保持するAPIアクション別の権限を、リクエストごとにDBから判定する認可基盤を登録する。
+// Cookieには権限を一切載せないため、ロール・権限の変更が既存のログインセッションへ即時反映される(decisions/0001参照)。
+builder.Services.AddAuthorization();
+builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionAuthorizationPolicyProvider>();
+builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
 // 認証 Cookie の保護と有効期間を定め、SPA が扱える HTTP ステータスを返す。
 builder.Services.ConfigureApplicationCookie(options =>
@@ -130,6 +138,10 @@ app.MapFallback("/api/{**path}", () => Results.NotFound());
 
 // SPA 内の URL を直接開いた場合も、クライアント側のルーティングに委ねる。
 app.MapFallbackToFile("index.html");
+
+// コード上の [PermissionKey] を PermissionActions テーブルへ同期する。
+// スキーマ変更ではなくデータ同期のため、マイグレーションの事前適用方針とは別に起動時に実行する。
+await PermissionActionSync.RunAsync(app.Services);
 
 // ホストを起動し、終了要求までリクエストを受け付ける。
 app.Run();

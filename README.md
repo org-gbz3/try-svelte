@@ -172,6 +172,35 @@ ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メ�
 | `GET /api/auth/me` | 認証済みなら `200` と `{ id, email }`、未認証なら `401` |
 | `POST /api/auth/logout` | Cookie を削除し `204` |
 
+## 認可(ロール・権限)
+
+ロールベースの認可方針は [ASP.NET_Core_Identity.md](ASP.NET_Core_Identity.md) の「6. 認証後に何を許可するか」と
+[decisions/0001-role-based-authorization-design.md](decisions/0001-role-based-authorization-design.md) を参照する。
+
+ロールの実体・ユーザーへの割り当ては ASP.NET Core Identity の標準ロール機能(`AspNetRoles`/`AspNetUserRoles`)を使う。
+1人のユーザーは複数のロールを同時に持て、実効権限は保持する全ロールの権限レベルの最大値になる。
+「管理者」という特別なロール名は存在せず、`Admin.Roles`/`Admin.UserRoles` への書き込み権限を持つことがそのまま管理者権限になる。
+非管理者は自分自身を含め誰のロールも変更できない(これらの権限を持たないため)。
+
+APIアクションには `[PermissionKey]` で権限キーを、`[RequirePermission]` で必要な権限レベル(`Read`/`Write`、`Write` は
+`Read` を含む)を宣言する。権限キーごとのロールの権限レベルは `RolePermissions` テーブルに持ち、リクエストのたびに
+DB を参照して判定するため、Cookie に権限情報は載らず、ロール・権限の変更は既存のログインセッションに即時反映される。
+起動時に、コード上の `[PermissionKey]` が `PermissionActions` テーブルへ自動同期される(削除されたキーは自動削除しない)。
+
+| API | 動作 |
+| --- | --- |
+| `GET /api/admin/roles` | ロール一覧とロールごとの権限を取得(`Admin.Roles` の `Read`) |
+| `GET /api/admin/roles/permission-actions` | 権限キーのカタログを取得(`Admin.Roles` の `Read`) |
+| `POST /api/admin/roles` | `{ name }` でロールを作成(`Admin.Roles` の `Write`) |
+| `PUT /api/admin/roles/{roleId}` | ロール名を変更(`Admin.Roles` の `Write`) |
+| `DELETE /api/admin/roles/{roleId}` | ロールを削除(`Admin.Roles` の `Write`) |
+| `PUT /api/admin/roles/{roleId}/permissions` | `{ permissions: [{ actionKey, level }] }` でロールの権限を一括更新(`Admin.Roles` の `Write`) |
+| `GET /api/admin/users/{userId}/roles` | 指定ユーザーの保持ロールを取得(`Admin.UserRoles` の `Read`) |
+| `PUT /api/admin/users/{userId}/roles` | `{ roles: [...] }` でユーザーのロールを置き換え(`Admin.UserRoles` の `Write`) |
+
+現時点ではこれらの管理APIのみを実装しており、ロール・権限を編集するフロントエンドの管理画面は未実装。
+最初の管理者アカウントの作成方法(ブートストラップ)も未実装で、別途決定する。
+
 更新 API は直前に `/api/auth/csrf` を呼び、返却されたトークンを `X-CSRF-TOKEN` ヘッダーに設定する。
 Cookie も同時に送信する。CSRF トークンなし・不正なトークンは `400`。
 ログイン前後でトークンの対象ユーザーが変わるため、トークンを使い回さない。
@@ -201,6 +230,9 @@ npm --prefix frontend run test
 dotnet build backend
 dotnet test backend.Tests
 dotnet publish backend -c Release
+
+# マイグレーション適用
+dotnet ef database update --project backend
 
 # ワンライナーで起動
 npm --prefix frontend run build && dotnet run --project backend
