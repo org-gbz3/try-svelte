@@ -10,6 +10,7 @@
 - frontend 配下を変更する前に、frontend/AGENTS.md が存在する場合は読む。
 - backend 配下を変更する前に、backend/AGENTS.md が存在する場合は読む。
 - 方針・仕様の変更に着手する前に、関連する過去の検討経緯が decisions/ にないか確認する。
+- DBエンティティ・APIのCRUD操作・対応する画面を変更する前に、[docs/features/](docs/features/) の該当ファイルを確認する。
 
 ## 共通コーディング規約
 
@@ -45,6 +46,11 @@
 - 本番の認証・CSRF Cookie の Secure 設定と HTTPS 配信を維持する。Data Protection の鍵は永続化し、複数インスタンスでは共有する構成にする。
 - 通常の `dotnet build` / `dotnet run` はフロントエンドをビルドしない。配備確認には通常の `dotnet publish backend -c Release` を使用し、`--no-build` で再生成を省略しない。
 - CSP は `frontend/vite.config.ts` で管理し、アプリのスタイルには CSS クラスを使う。SvelteKit 更新で `svelte-announcer` のインラインスタイルが変わった場合は、実際の内容に合わせて許可ハッシュを更新する。
+
+## DBエンティティ・画面のCRUDを変更するとき
+
+- エンティティ(`backend/Data`)、コントローラーのCRUD操作、または対応するフロントエンド画面を変更した場合は、`docs/features/` の該当ファイル(ER図・画面操作とCRUD対応表)も同じ変更の中で更新する。
+- 新しい権限キードメイン(新しいプレフィックス)を追加した場合は `docs/features/` に新しいファイルを追加し、[docs/README.md](docs/README.md) の一覧表にも追記する。
 
 ## 方針・仕様を決定するとき
 

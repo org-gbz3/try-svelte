@@ -7,6 +7,7 @@ SvelteKit(SPA)をビルドして `backend/wwwroot` に配備し、ASP.NET Core(.
 - `backend/` — ASP.NET Core Web API（Controllers ベース、.NET 10）。`wwwroot` に配置された静的ファイルを配信し、API は `api/` 配下。
 - `frontend/` — SvelteKit（`@sveltejs/adapter-static` によるSPAビルド）。ビルド出力は直接 `backend/wwwroot` へ書き出される。
 - `decisions/` — 方針・仕様を検討した経緯（ADR）。現時点の仕様そのものはこの README や [ASP.NET_Core_Identity.md](ASP.NET_Core_Identity.md) 側に記載し、`decisions/` にはなぜその決定に至ったかを記録する。詳細は [decisions/README.md](decisions/README.md) を参照。
+- `docs/` — 機能別のER図と、画面操作とCRUD操作の対応表。現時点の仕様を示す資料で、対応するエンティティ・API・画面を変更するときに更新する。詳細は [docs/README.md](docs/README.md) を参照。
 
 エージェント向けの実装・テスト作成ルールは [AGENTS.md](AGENTS.md) を参照する。
 
