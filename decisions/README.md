@@ -49,3 +49,4 @@
 | [0002](0002-explicit-transactions-for-multi-step-writes.md) | 複数保存ポイントを持つDB書き込みの明示的トランザクション化 | 採用 |
 | [0003](0003-expose-effective-permissions-in-me.md) | /api/auth/me での実効権限マップの返却 | 採用 |
 | [0004](0004-admin-user-list-design.md) | 管理者向けユーザー一覧画面の設計 | 採用 |
+| [0005](0005-user-list-email-search-options.md) | ユーザー一覧のメール検索オプション(前方一致・大文字小文字区別)の実装方式 | 採用 |

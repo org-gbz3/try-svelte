@@ -217,6 +217,42 @@ public class AuthorizationTests
         Assert.Equal("alice@example.com", body.Items[0].Email);
     }
 
+    [Fact(DisplayName = "caseSensitive=trueを指定すると大文字小文字を区別する")]
+    public async Task UserListFiltersByEmailCaseSensitivelyWhenRequested()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, adminId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(adminId, "user-viewer", "Admin.Users", PermissionLevel.Read);
+        await factory.CreateOtherUserAsync("cs-alice@example.com");
+        await factory.CreateOtherUserAsync("cs-bob@example.com");
+
+        using var response = await client.GetAsync("/api/admin/users?email=CS-ALI&caseSensitive=true");
+        var body = await response.Content.ReadFromJsonAsync<UserListResponse>();
+        Assert.Empty(body!.Items);
+
+        using var matching = await client.GetAsync("/api/admin/users?email=cs-ali&caseSensitive=true");
+        var matchingBody = await matching.Content.ReadFromJsonAsync<UserListResponse>();
+        Assert.Single(matchingBody!.Items);
+        Assert.Equal("cs-alice@example.com", matchingBody.Items[0].Email);
+    }
+
+    [Fact(DisplayName = "prefixMatch=trueを指定すると前方一致だけに絞り込む")]
+    public async Task UserListFiltersByEmailPrefixWhenRequested()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, adminId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(adminId, "user-viewer", "Admin.Users", PermissionLevel.Read);
+        await factory.CreateOtherUserAsync("prefix-alice@example.com");
+        await factory.CreateOtherUserAsync("has-prefix-bob@example.com");
+
+        using var response = await client.GetAsync("/api/admin/users?email=prefix-&prefixMatch=true");
+        var body = await response.Content.ReadFromJsonAsync<UserListResponse>();
+        Assert.Single(body!.Items);
+        Assert.Equal("prefix-alice@example.com", body.Items[0].Email);
+    }
+
     [Fact(DisplayName = "登録日時の昇順・降順でソートできる")]
     public async Task UserListSortsByCreatedAt()
     {
