@@ -236,6 +236,11 @@ SPA は起動・再読み込み時に `/api/auth/me` を呼ぶ。確認中は待
 再試行画面を表示し、未ログインとは区別する。ユーザー情報はメモリ上に保持し、localStorage は認証に使用しない。
 保護された API は `frontend/src/lib/auth.svelte.ts` の `apiFetch` 経由で呼び出す。
 `401` は未ログインへ遷移し、`403` は権限不足として認証状態を維持する。
+`apiFetch`/`csrfRequest` は第三引数(`csrfRequest` は第四引数)の `{ timeoutMs?, retries? }` でタイムアウト・
+リトライ回数を個別に上書きできる。既定値はタイムアウトが `DEFAULT_API_TIMEOUT_MS`(10秒)、通信自体が失敗した
+(タイムアウト・ネットワーク断)場合に初回アクセスとは別に再試行する回数が参照系(GET/HEAD)`DEFAULT_READ_RETRIES`
+(3回、初回と合わせて最大4回試行)・更新系 `DEFAULT_WRITE_RETRIES`(0回 = リトライなし、二重実行を避けるため)。
+応答が返った `4xx`/`5xx` は再試行しない。
 画面表示とは独立して API ごとに `[Authorize]` で認証する（`/api/weatherforecast` も保護対象）。
 存在しない `/api` 配下の URL は SPA の HTML ではなく `404` を返す。
 
