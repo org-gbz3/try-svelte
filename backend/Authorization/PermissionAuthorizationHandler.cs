@@ -7,7 +7,7 @@ namespace backend.Authorization;
 
 // 権限情報をCookieに一切載せず、リクエストごとにDBを参照して判定する。
 // ロール・権限の変更を既存のログインセッションへ即時反映するための設計判断(decisions/0001参照)。
-public sealed class PermissionAuthorizationHandler(AuthDbContext db, UserManager<IdentityUser> users)
+public sealed class PermissionAuthorizationHandler(AuthDbContext db, UserManager<ApplicationUser> users)
     : AuthorizationHandler<PermissionRequirement>
 {
     protected override async Task HandleRequirementAsync(

@@ -203,11 +203,14 @@ DB を参照して判定するため、Cookie に権限情報は載らず、ロ�
 | `PUT /api/admin/roles/{roleId}/permissions` | `{ permissions: [{ actionKey, level }] }` でロールの権限を一括更新(`Admin.Roles` の `Write`) |
 | `GET /api/admin/users/{userId}/roles` | 指定ユーザーの保持ロールを取得(`Admin.UserRoles` の `Read`) |
 | `PUT /api/admin/users/{userId}/roles` | `{ roles: [...] }` でユーザーのロールを置き換え(`Admin.UserRoles` の `Write`) |
+| `GET /api/admin/users` | ユーザー一覧をメールアドレス部分一致で絞り込み・メールアドレス/登録日時で並び替え・ページングして取得(`Admin.Users` の `Read`) |
 
-フロントエンドの管理画面は `/admin/roles`(ロールの一覧・作成・名称変更・削除・権限マトリクス編集)のみ実装している。
-トップ画面には `Admin.Roles` の `Read` 権限を持つ場合のみこの画面へのリンクを表示するが、直接URLを開かれた場合に
-備えて画面側でも `403` 応答を検出し「権限がありません」と案内する。ユーザーへのロール割り当て(`/api/admin/users/{userId}/roles`)
-を操作する画面は、ユーザーを検索するAPIが無いため未実装のまま。
+フロントエンドの管理画面は `/admin/roles`(ロールの一覧・作成・名称変更・削除・権限マトリクス編集)と、
+`/admin/users`(ユーザー一覧の検索・並び替え・ページング)、`/admin/users/{userId}/roles`(個別ユーザーへの
+ロール編集)を実装している。トップ画面には対応する `Read` 権限を持つ場合のみ各画面へのリンクを表示するが、
+直接URLを開かれた場合に備えて画面側でも `403` 応答を検出し「権限がありません」と案内する。
+`/admin/users/{userId}/roles` はロール名の一覧を表示するために `GET /api/admin/roles` も呼ぶため、
+利用には `Admin.UserRoles` に加えて `Admin.Roles` の `Read` も必要になる。
 
 ### 最初の管理者のブートストラップ
 
@@ -233,6 +236,11 @@ SPA は起動・再読み込み時に `/api/auth/me` を呼ぶ。確認中は待
 再試行画面を表示し、未ログインとは区別する。ユーザー情報はメモリ上に保持し、localStorage は認証に使用しない。
 保護された API は `frontend/src/lib/auth.svelte.ts` の `apiFetch` 経由で呼び出す。
 `401` は未ログインへ遷移し、`403` は権限不足として認証状態を維持する。
+`apiFetch`/`csrfRequest` は第三引数(`csrfRequest` は第四引数)の `{ timeoutMs?, retries? }` でタイムアウト・
+リトライ回数を個別に上書きできる。既定値はタイムアウトが `DEFAULT_API_TIMEOUT_MS`(10秒)、通信自体が失敗した
+(タイムアウト・ネットワーク断)場合に初回アクセスとは別に再試行する回数が参照系(GET/HEAD)`DEFAULT_READ_RETRIES`
+(3回、初回と合わせて最大4回試行)・更新系 `DEFAULT_WRITE_RETRIES`(0回 = リトライなし、二重実行を避けるため)。
+応答が返った `4xx`/`5xx` は再試行しない。
 画面表示とは独立して API ごとに `[Authorize]` で認証する（`/api/weatherforecast` も保護対象）。
 存在しない `/api` 配下の URL は SPA の HTML ではなく `404` を返す。
 

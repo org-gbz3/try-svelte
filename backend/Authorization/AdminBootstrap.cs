@@ -44,7 +44,7 @@ public static class AdminBootstrap
         ).AnyAsync();
         if (adminExists) return;
 
-        var users = provider.GetRequiredService<UserManager<IdentityUser>>();
+        var users = provider.GetRequiredService<UserManager<ApplicationUser>>();
         var roles = provider.GetRequiredService<RoleManager<IdentityRole>>();
 
         await using var transaction = await db.Database.BeginTransactionAsync();
@@ -52,11 +52,12 @@ public static class AdminBootstrap
         var user = await users.FindByEmailAsync(options.Email.Trim());
         if (user is null)
         {
-            user = new IdentityUser
+            user = new ApplicationUser
             {
                 UserName = options.Email.Trim(),
                 Email = options.Email.Trim(),
-                EmailConfirmed = true
+                EmailConfirmed = true,
+                CreatedAt = DateTime.UtcNow
             };
             var createUserResult = await users.CreateAsync(user, options.Password);
             if (!createUserResult.Succeeded)

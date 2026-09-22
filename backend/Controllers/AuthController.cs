@@ -16,8 +16,8 @@ namespace backend.Controllers;
 [ApiController]
 [Route("api/auth")]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
-public class AuthController(UserManager<IdentityUser> users,
-    SignInManager<IdentityUser> signIn, IAntiforgery antiforgery,
+public class AuthController(UserManager<ApplicationUser> users,
+    SignInManager<ApplicationUser> signIn, IAntiforgery antiforgery,
     IConfirmationEmailSender emailSender, ILogger<AuthController> logger,
     IHostEnvironment environment, AuthDbContext db) : ControllerBase
 {
@@ -31,7 +31,12 @@ public class AuthController(UserManager<IdentityUser> users,
     [HttpPost("register")]
     public async Task<IActionResult> Register(Credentials request)
     {
-        var user = new IdentityUser { UserName = request.Email.Trim(), Email = request.Email.Trim() };
+        var user = new ApplicationUser
+        {
+            UserName = request.Email.Trim(),
+            Email = request.Email.Trim(),
+            CreatedAt = DateTime.UtcNow
+        };
         IdentityResult result;
         try
         {
@@ -78,7 +83,7 @@ public class AuthController(UserManager<IdentityUser> users,
         return Ok(new { message = "未確認のアカウントがある場合、確認メールを送信します。届かない場合は時間をおいて再試行してください。" });
     }
 
-    private async Task<bool> SendConfirmation(IdentityUser user)
+    private async Task<bool> SendConfirmation(ApplicationUser user)
     {
         try
         {

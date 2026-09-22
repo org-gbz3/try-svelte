@@ -92,6 +92,20 @@ public class AuthTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
+    [Fact(DisplayName = "登録直後のユーザーには現在時刻に近い登録日時が記録される")]
+    public async Task RegistrationRecordsCreatedAt()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var before = DateTime.UtcNow;
+        var credentials = await Register(client, factory);
+        var after = DateTime.UtcNow;
+
+        var createdAt = await factory.GetCreatedAtAsync(credentials.Email);
+        Assert.NotNull(createdAt);
+        Assert.InRange(createdAt.Value, before, after);
+    }
+
     [Fact(DisplayName = "登録だけではログイン状態にならない")]
     public async Task RegistrationDoesNotSignIn()
     {
@@ -499,7 +513,7 @@ public class AuthTests
         {
             using var scope = Services.CreateScope();
             var provider = scope.ServiceProvider;
-            var users = provider.GetRequiredService<UserManager<IdentityUser>>();
+            var users = provider.GetRequiredService<UserManager<ApplicationUser>>();
             var roles = provider.GetRequiredService<RoleManager<IdentityRole>>();
             var db = provider.GetRequiredService<AuthDbContext>();
 
@@ -514,6 +528,14 @@ public class AuthTests
                 .SingleAsync();
             db.RolePermissions.Add(new RolePermission { RoleId = role.Id, PermissionActionId = actionId, Level = PermissionLevel.Read });
             await db.SaveChangesAsync();
+        }
+
+        public async Task<DateTime?> GetCreatedAtAsync(string email)
+        {
+            using var scope = Services.CreateScope();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var user = await users.FindByEmailAsync(email) ?? throw new InvalidOperationException("ユーザーが見つかりません。");
+            return user.CreatedAt;
         }
 
         protected override void Dispose(bool disposing)

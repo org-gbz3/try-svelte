@@ -11,7 +11,7 @@ namespace backend.Controllers;
 [ApiController]
 [Route("api/admin/users/{userId}/roles")]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
-public class UserRolesController(UserManager<IdentityUser> userManager, AuthDbContext db) : ControllerBase
+public class UserRolesController(UserManager<ApplicationUser> userManager, AuthDbContext db) : ControllerBase
 {
     [PermissionKey("Admin.UserRoles", "ユーザーへのロール割り当て")]
     [RequirePermission("Admin.UserRoles", PermissionLevel.Read)]

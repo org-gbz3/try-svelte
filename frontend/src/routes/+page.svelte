@@ -32,6 +32,9 @@
 			{#if auth.hasPermission('Admin.Roles', PermissionLevel.Read)}
 				<a href="/admin/roles">ロール管理</a>
 			{/if}
+			{#if auth.hasPermission('Admin.Users', PermissionLevel.Read)}
+				<a href="/admin/users">ユーザー管理</a>
+			{/if}
 			<button onclick={handleLogout} disabled={submitting}>ログアウト</button>
 			{#if error}<p role="alert">{error}</p>{/if}
 		</div>
