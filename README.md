@@ -203,11 +203,14 @@ DB を参照して判定するため、Cookie に権限情報は載らず、ロ�
 | `PUT /api/admin/roles/{roleId}/permissions` | `{ permissions: [{ actionKey, level }] }` でロールの権限を一括更新(`Admin.Roles` の `Write`) |
 | `GET /api/admin/users/{userId}/roles` | 指定ユーザーの保持ロールを取得(`Admin.UserRoles` の `Read`) |
 | `PUT /api/admin/users/{userId}/roles` | `{ roles: [...] }` でユーザーのロールを置き換え(`Admin.UserRoles` の `Write`) |
+| `GET /api/admin/users` | ユーザー一覧をメールアドレス部分一致で絞り込み・メールアドレス/登録日時で並び替え・ページングして取得(`Admin.Users` の `Read`) |
 
-フロントエンドの管理画面は `/admin/roles`(ロールの一覧・作成・名称変更・削除・権限マトリクス編集)のみ実装している。
-トップ画面には `Admin.Roles` の `Read` 権限を持つ場合のみこの画面へのリンクを表示するが、直接URLを開かれた場合に
-備えて画面側でも `403` 応答を検出し「権限がありません」と案内する。ユーザーへのロール割り当て(`/api/admin/users/{userId}/roles`)
-を操作する画面は、ユーザーを検索するAPIが無いため未実装のまま。
+フロントエンドの管理画面は `/admin/roles`(ロールの一覧・作成・名称変更・削除・権限マトリクス編集)と、
+`/admin/users`(ユーザー一覧の検索・並び替え・ページング)、`/admin/users/{userId}/roles`(個別ユーザーへの
+ロール編集)を実装している。トップ画面には対応する `Read` 権限を持つ場合のみ各画面へのリンクを表示するが、
+直接URLを開かれた場合に備えて画面側でも `403` 応答を検出し「権限がありません」と案内する。
+`/admin/users/{userId}/roles` はロール名の一覧を表示するために `GET /api/admin/roles` も呼ぶため、
+利用には `Admin.UserRoles` に加えて `Admin.Roles` の `Read` も必要になる。
 
 ### 最初の管理者のブートストラップ
 

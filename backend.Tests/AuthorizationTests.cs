@@ -164,6 +164,195 @@ public class AuthorizationTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    [Fact(DisplayName = "Admin.Users権限を持たないログインユーザーはユーザー一覧APIを利用できない")]
+    public async Task UserListRejectsUserWithoutPermission()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+        using var response = await client.GetAsync("/api/admin/users");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "未ログインではユーザー一覧APIを利用できない")]
+    public async Task UserListRejectsAnonymous()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        using var response = await client.GetAsync("/api/admin/users");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "Admin.Users権限があればユーザー一覧を取得できる")]
+    public async Task UserListAcceptsUserWithPermission()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, adminId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(adminId, "user-viewer", "Admin.Users", PermissionLevel.Read);
+        await factory.CreateOtherUserAsync("list-a@example.com");
+        await factory.CreateOtherUserAsync("list-b@example.com");
+
+        // 環境によってはブートストラップ管理者など他のユーザーも存在しうるため、
+        // 作成した2件に絞り込んだ上で件数を確認する。
+        using var response = await client.GetAsync("/api/admin/users?email=list-");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<UserListResponse>();
+        Assert.Equal(2, body!.TotalCount);
+    }
+
+    [Fact(DisplayName = "メールアドレスの部分一致で絞り込める(大文字小文字を区別しない)")]
+    public async Task UserListFiltersByEmailCaseInsensitively()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, adminId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(adminId, "user-viewer", "Admin.Users", PermissionLevel.Read);
+        await factory.CreateOtherUserAsync("alice@example.com");
+        await factory.CreateOtherUserAsync("bob@example.com");
+
+        using var response = await client.GetAsync("/api/admin/users?email=ALI");
+        var body = await response.Content.ReadFromJsonAsync<UserListResponse>();
+        Assert.Single(body!.Items);
+        Assert.Equal("alice@example.com", body.Items[0].Email);
+    }
+
+    [Fact(DisplayName = "登録日時の昇順・降順でソートできる")]
+    public async Task UserListSortsByCreatedAt()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, adminId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(adminId, "user-viewer", "Admin.Users", PermissionLevel.Read);
+        var now = DateTime.UtcNow;
+        await factory.CreateOtherUserAsync("sort-a@example.com", now.AddDays(-3));
+        await factory.CreateOtherUserAsync("sort-b@example.com", now.AddDays(-2));
+        await factory.CreateOtherUserAsync("sort-c@example.com", now.AddDays(-1));
+
+        using var ascending = await client.GetAsync("/api/admin/users?email=sort-&sort=CreatedAt&direction=Ascending");
+        var ascendingBody = await ascending.Content.ReadFromJsonAsync<UserListResponse>();
+        Assert.Equal(["sort-a@example.com", "sort-b@example.com", "sort-c@example.com"],
+            ascendingBody!.Items.Select(item => item.Email));
+
+        using var descending = await client.GetAsync("/api/admin/users?email=sort-&sort=CreatedAt&direction=Descending");
+        var descendingBody = await descending.Content.ReadFromJsonAsync<UserListResponse>();
+        Assert.Equal(["sort-c@example.com", "sort-b@example.com", "sort-a@example.com"],
+            descendingBody!.Items.Select(item => item.Email));
+    }
+
+    [Fact(DisplayName = "登録日時が不明なユーザーは並び順にかかわらず末尾になる")]
+    public async Task UserListSortsNullCreatedAtLast()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, adminId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(adminId, "user-viewer", "Admin.Users", PermissionLevel.Read);
+        var now = DateTime.UtcNow;
+        await factory.CreateOtherUserAsync("nullsort-a@example.com", createdAt: null);
+        await factory.CreateOtherUserAsync("nullsort-b@example.com", now.AddDays(-2));
+        await factory.CreateOtherUserAsync("nullsort-c@example.com", now.AddDays(-1));
+
+        using var ascending = await client.GetAsync("/api/admin/users?email=nullsort-&sort=CreatedAt&direction=Ascending");
+        var ascendingBody = await ascending.Content.ReadFromJsonAsync<UserListResponse>();
+        Assert.Equal(["nullsort-b@example.com", "nullsort-c@example.com", "nullsort-a@example.com"],
+            ascendingBody!.Items.Select(item => item.Email));
+
+        using var descending = await client.GetAsync("/api/admin/users?email=nullsort-&sort=CreatedAt&direction=Descending");
+        var descendingBody = await descending.Content.ReadFromJsonAsync<UserListResponse>();
+        Assert.Equal(["nullsort-c@example.com", "nullsort-b@example.com", "nullsort-a@example.com"],
+            descendingBody!.Items.Select(item => item.Email));
+    }
+
+    [Fact(DisplayName = "メールアドレスの昇順・降順でソートできる")]
+    public async Task UserListSortsByEmail()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, adminId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(adminId, "user-viewer", "Admin.Users", PermissionLevel.Read);
+        await factory.CreateOtherUserAsync("esort-b@example.com");
+        await factory.CreateOtherUserAsync("esort-a@example.com");
+
+        using var ascending = await client.GetAsync("/api/admin/users?email=esort-&sort=Email&direction=Ascending");
+        var ascendingBody = await ascending.Content.ReadFromJsonAsync<UserListResponse>();
+        Assert.Equal(["esort-a@example.com", "esort-b@example.com"], ascendingBody!.Items.Select(item => item.Email));
+
+        using var descending = await client.GetAsync("/api/admin/users?email=esort-&sort=Email&direction=Descending");
+        var descendingBody = await descending.Content.ReadFromJsonAsync<UserListResponse>();
+        Assert.Equal(["esort-b@example.com", "esort-a@example.com"], descendingBody!.Items.Select(item => item.Email));
+    }
+
+    [Fact(DisplayName = "同時刻に登録された場合もページをまたいで安定した順序になる")]
+    public async Task UserListPaginationIsStableForTiedSortValues()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, adminId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(adminId, "user-viewer", "Admin.Users", PermissionLevel.Read);
+        var tied = DateTime.UtcNow;
+        await factory.CreateOtherUserAsync("tie-a@example.com", tied);
+        await factory.CreateOtherUserAsync("tie-b@example.com", tied);
+        await factory.CreateOtherUserAsync("tie-c@example.com", tied);
+
+        using var page1 = await client.GetAsync("/api/admin/users?email=tie-&sort=CreatedAt&pageSize=2&page=1");
+        using var page2 = await client.GetAsync("/api/admin/users?email=tie-&sort=CreatedAt&pageSize=2&page=2");
+        var body1 = await page1.Content.ReadFromJsonAsync<UserListResponse>();
+        var body2 = await page2.Content.ReadFromJsonAsync<UserListResponse>();
+
+        Assert.Equal(2, body1!.Items.Count);
+        Assert.Single(body2!.Items);
+        var allIds = body1.Items.Select(item => item.Id).Concat(body2.Items.Select(item => item.Id)).ToList();
+        Assert.Equal(3, allIds.Distinct().Count());
+    }
+
+    [Fact(DisplayName = "pageとpageSizeでページングできる")]
+    public async Task UserListPaginatesWithPageAndPageSize()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, adminId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(adminId, "user-viewer", "Admin.Users", PermissionLevel.Read);
+        var now = DateTime.UtcNow;
+        for (var i = 0; i < 5; i++)
+            await factory.CreateOtherUserAsync($"page-test-{i}@example.com", now.AddMinutes(-i));
+
+        using var page1 = await client.GetAsync("/api/admin/users?email=page-test-&sort=CreatedAt&direction=Ascending&pageSize=2&page=1");
+        using var page2 = await client.GetAsync("/api/admin/users?email=page-test-&sort=CreatedAt&direction=Ascending&pageSize=2&page=2");
+        using var page3 = await client.GetAsync("/api/admin/users?email=page-test-&sort=CreatedAt&direction=Ascending&pageSize=2&page=3");
+        var body1 = await page1.Content.ReadFromJsonAsync<UserListResponse>();
+        var body2 = await page2.Content.ReadFromJsonAsync<UserListResponse>();
+        var body3 = await page3.Content.ReadFromJsonAsync<UserListResponse>();
+
+        Assert.Equal(["page-test-4@example.com", "page-test-3@example.com"], body1!.Items.Select(item => item.Email));
+        Assert.Equal(["page-test-2@example.com", "page-test-1@example.com"], body2!.Items.Select(item => item.Email));
+        Assert.Equal(["page-test-0@example.com"], body3!.Items.Select(item => item.Email));
+        Assert.Equal(5, body1.TotalCount);
+    }
+
+    [Fact(DisplayName = "pageSizeが上限を超える場合は400を返す")]
+    public async Task UserListRejectsPageSizeAboveLimit()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, adminId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(adminId, "user-viewer", "Admin.Users", PermissionLevel.Read);
+
+        using var response = await client.GetAsync("/api/admin/users?pageSize=101");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "sortに不正な値を指定すると400を返す")]
+    public async Task UserListRejectsInvalidSortValue()
+    {
+        using var factory = new AuthorizationFactory();
+        using var client = factory.CreateClient();
+        var (_, adminId) = await RegisterAndLogin(client, factory);
+        await factory.GrantRoleWithPermissionAsync(adminId, "user-viewer", "Admin.Users", PermissionLevel.Read);
+
+        using var response = await client.GetAsync("/api/admin/users?sort=bogus");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Fact(DisplayName = "/api/auth/me はログイン中ユーザーの実効権限マップを返す")]
     public async Task MeReturnsEffectivePermissions()
     {
@@ -236,6 +425,8 @@ public class AuthorizationTests
     private record Credentials(string Email, string Password);
     private record Csrf(string Token);
     private record MeResponse(string Id, string Email, Dictionary<string, PermissionLevel> Permissions);
+    private record UserListItemResponse(string Id, string Email, DateTime? CreatedAt);
+    private record UserListResponse(List<UserListItemResponse> Items, int TotalCount, int Page, int PageSize);
 
     private sealed class RecordingEmailSender : IConfirmationEmailSender
     {
@@ -277,7 +468,7 @@ public class AuthorizationTests
             var roleId = await CreateRoleAsync(roleName);
             await SetRolePermissionAsync(roleId, actionKey, level);
             using var scope = Services.CreateScope();
-            var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
             var user = await users.FindByIdAsync(userId) ?? throw new InvalidOperationException("ユーザーが見つかりません。");
             Assert.True((await users.AddToRoleAsync(user, roleName)).Succeeded);
             return roleId;
@@ -326,11 +517,11 @@ public class AuthorizationTests
             return role.Id;
         }
 
-        public async Task<string> CreateOtherUserAsync(string email)
+        public async Task<string> CreateOtherUserAsync(string email, DateTime? createdAt = null)
         {
             using var scope = Services.CreateScope();
-            var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
-            var user = new IdentityUser { UserName = email, Email = email, EmailConfirmed = true };
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var user = new ApplicationUser { UserName = email, Email = email, EmailConfirmed = true, CreatedAt = createdAt };
             Assert.True((await users.CreateAsync(user, Password)).Succeeded);
             return user.Id;
         }

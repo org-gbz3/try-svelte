@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace backend.Data;
 
 public class AuthDbContext(DbContextOptions<AuthDbContext> options)
-    : IdentityDbContext<IdentityUser>(options)
+    : IdentityDbContext<ApplicationUser>(options)
 {
     public DbSet<PermissionAction> PermissionActions => Set<PermissionAction>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();

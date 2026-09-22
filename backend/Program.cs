@@ -43,7 +43,7 @@ builder.Services.AddDbContext<AuthDbContext>(options =>
         ?? throw new InvalidOperationException("ConnectionStrings:AuthDatabase を設定してください。")));
 
 // メール確認とパスワード要件・ロックアウトを Identity に統一して適用する。
-builder.Services.AddIdentity<IdentityUser, IdentityRole>(options =>
+builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 {
     options.User.RequireUniqueEmail = true;
     options.SignIn.RequireConfirmedEmail = true;
