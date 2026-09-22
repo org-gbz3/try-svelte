@@ -17,6 +17,10 @@
 	let direction = $state<SortDirection>('descending');
 	let emailInput = $state('');
 	let emailFilter = $state('');
+	let prefixMatchInput = $state(false);
+	let prefixMatchFilter = $state(false);
+	let caseSensitiveInput = $state(false);
+	let caseSensitiveFilter = $state(false);
 	let loading = $state(true);
 	let forbidden = $state(false);
 	let loadError = $state('');
@@ -28,6 +32,8 @@
 	function buildQuery(): string {
 		const params = new URLSearchParams();
 		if (emailFilter) params.set('email', emailFilter);
+		if (prefixMatchFilter) params.set('prefixMatch', 'true');
+		if (caseSensitiveFilter) params.set('caseSensitive', 'true');
 		params.set('sort', sort);
 		params.set('direction', direction);
 		params.set('page', String(page));
@@ -63,6 +69,8 @@
 	function submitSearch(event: SubmitEvent) {
 		event.preventDefault();
 		emailFilter = emailInput.trim();
+		prefixMatchFilter = prefixMatchInput;
+		caseSensitiveFilter = caseSensitiveInput;
 		page = 1;
 		void load();
 	}
@@ -119,6 +127,14 @@
 					<label>
 						メールアドレスで検索
 						<input bind:value={emailInput} placeholder="例: example.com" />
+					</label>
+					<label class="checkbox-label">
+						<input type="checkbox" bind:checked={prefixMatchInput} />
+						前方一致検索
+					</label>
+					<label class="checkbox-label">
+						<input type="checkbox" bind:checked={caseSensitiveInput} />
+						大文字小文字を区別
 					</label>
 					<button type="submit">検索</button>
 				</form>
@@ -215,6 +231,18 @@
 		background: var(--color-neutral-50);
 		border: 1px solid var(--color-neutral-300);
 		border-radius: var(--radius-input);
+	}
+
+	.checkbox-label {
+		flex-direction: row;
+		align-items: center;
+		gap: var(--space-xs);
+		white-space: nowrap;
+	}
+
+	.checkbox-label input {
+		width: auto;
+		padding: 0;
 	}
 
 	table {

@@ -81,6 +81,19 @@ describe('admin users page', () => {
 		await waitFor(() => expect(lastUsersUrl).toContain('email=alice'));
 	});
 
+	it('前方一致・大文字小文字を区別のオプションを付けて検索する', async () => {
+		render(Page);
+		await screen.findByText('alice@example.com');
+
+		await fireEvent.input(screen.getByLabelText('メールアドレスで検索'), { target: { value: 'alice' } });
+		await fireEvent.click(screen.getByLabelText('前方一致検索'));
+		await fireEvent.click(screen.getByLabelText('大文字小文字を区別'));
+		await fireEvent.click(screen.getByRole('button', { name: '検索' }));
+
+		await waitFor(() => expect(lastUsersUrl).toContain('prefixMatch=true'));
+		expect(lastUsersUrl).toContain('caseSensitive=true');
+	});
+
 	it('列見出しをクリックするとソート条件付きで再取得する', async () => {
 		render(Page);
 		await screen.findByText('alice@example.com');
