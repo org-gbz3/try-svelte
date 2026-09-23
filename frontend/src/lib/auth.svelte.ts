@@ -162,11 +162,50 @@ export const auth = {
 		})();
 		return pendingCheck;
 	},
-	async login(email: string, password: string) {
+	async login(email: string, password: string): Promise<'authenticated' | 'requires-2fa'> {
 		const response = await post('/api/auth/login', { email, password });
 		if (!response.ok) throw await responseError(response, 'ログインできませんでした。');
+		const body = await response.json();
+		if (body.requiresTwoFactor) return 'requires-2fa';
+		user = body;
+		status = 'authenticated';
+		return 'authenticated';
+	},
+	async verifyTwoFactorCode(code: string) {
+		const response = await post('/api/auth/login/verify-2fa', { code });
+		if (!response.ok) throw await responseError(response, 'コードを確認できませんでした。');
 		user = await response.json();
 		status = 'authenticated';
+	},
+	async verifyRecoveryCode(code: string) {
+		const response = await post('/api/auth/login/verify-recovery-code', { code });
+		if (!response.ok) throw await responseError(response, 'リカバリーコードを確認できませんでした。');
+		user = await response.json();
+		status = 'authenticated';
+	},
+	async mfaStatus(): Promise<{ enabled: boolean; recoveryCodesRemaining: number }> {
+		const response = await apiFetch('/api/auth/mfa/status');
+		if (!response.ok) throw await responseError(response, 'MFAの状態を取得できませんでした。');
+		return await response.json();
+	},
+	async setupMfa(): Promise<{ sharedKey: string; otpauthUri: string }> {
+		const response = await post('/api/auth/mfa/setup');
+		if (!response.ok) throw await responseError(response, 'MFAの設定を開始できませんでした。');
+		return await response.json();
+	},
+	async enableMfa(code: string): Promise<string[]> {
+		const response = await post('/api/auth/mfa/enable', { code });
+		if (!response.ok) throw await responseError(response, 'MFAを有効化できませんでした。');
+		return (await response.json()).recoveryCodes;
+	},
+	async disableMfa(password: string) {
+		const response = await post('/api/auth/mfa/disable', { password });
+		if (!response.ok) throw await responseError(response, 'MFAを無効化できませんでした。');
+	},
+	async regenerateRecoveryCodes(password: string): Promise<string[]> {
+		const response = await post('/api/auth/mfa/recovery-codes', { password });
+		if (!response.ok) throw await responseError(response, 'リカバリーコードを再生成できませんでした。');
+		return (await response.json()).recoveryCodes;
 	},
 	async signup(email: string, password: string) {
 		const response = await post('/api/auth/register', { email, password });

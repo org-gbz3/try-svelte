@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using backend.Authorization;
 using backend.Data;
 using backend.Services;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -63,6 +64,8 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
     options.Tokens.PasswordResetTokenProvider = "PasswordReset";
     // パスキー(IUserPasskeyStore)のEFモデルを有効にするため、対応するスキーマバージョンを指定する。
     options.Stores.SchemaVersion = IdentitySchemaVersions.Version3;
+    // MFA(TOTP)の認証アプリに表示する発行者名。QRコード・手動入力キーの otpauth:// URI 組み立てに使う。
+    options.Tokens.AuthenticatorIssuer = "Try Svelte";
 }).AddEntityFrameworkStores<AuthDbContext>()
     .AddDefaultTokenProviders()
     .AddTokenProvider<PasswordResetTokenProvider>("PasswordReset");
@@ -110,6 +113,17 @@ builder.Services.ConfigureApplicationCookie(options =>
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         return Task.CompletedTask;
     };
+});
+
+// パスワード成功後・MFAコード入力待ちの間だけ使われる一時Cookie。既定でも発行されるが、
+// 認証Cookieと同じ保護水準(HttpOnly・SameSite・Secure)を明示して規約を揃える。
+builder.Services.Configure<CookieAuthenticationOptions>(IdentityConstants.TwoFactorUserIdScheme, options =>
+{
+    options.Cookie.Name = "try-svelte.auth-2fa";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+        ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
 });
 
 // Cookie 認証を利用する更新 API を、別サイトからの不正なリクエストから保護する。
