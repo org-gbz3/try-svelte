@@ -135,6 +135,15 @@ export const auth = {
 		if (!response.ok) throw await responseError(response, '再送を受け付けられませんでした。');
 		return (await response.json()).message as string;
 	},
+	async requestPasswordReset(email: string) {
+		const response = await post('/api/auth/forgot-password', { email });
+		if (!response.ok) throw await responseError(response, '再設定メールの送信を受け付けられませんでした。');
+		return (await response.json()).message as string;
+	},
+	async resetPassword(userId: string, token: string, newPassword: string) {
+		const response = await post('/api/auth/reset-password', { userId, token, newPassword });
+		if (!response.ok) throw await responseError(response, 'パスワードを再設定できませんでした。');
+	},
 	async logout() {
 		// サーバー側で Cookie は既に削除されているため、通信自体が失敗しても
 		// ローカル状態は解除する(例外の有無にかかわらず finally で必ず実行)。

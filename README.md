@@ -98,6 +98,7 @@ ASP.NET Core はこの設定ファイルのコメントを読み飛ばす。
 | --- | --- |
 | `PublicBaseUrl` | 利用者が開く SPA の URL。Vite 開発時は `http://localhost:5173`、バックエンドから配信する場合はその URL。本番は HTTPS 必須 |
 | `ConfirmationTokenLifespanMinutes` | 確認トークンの発行からの有効期限（分）。1以上の整数、既定値は `1440`（24時間）。メール本文にも同じ値を表示 |
+| `PasswordResetTokenLifespanMinutes` | パスワード再設定トークンの発行からの有効期限（分）。1以上の整数、既定値は `30`。確認トークンとは別のトークンプロバイダーを使うため、期限も独立して設定する |
 | `Host` | 配信サービスの SMTP ホスト名 |
 | `Port` | STARTTLS 用ポート（通常 `587`）。暗黙 TLS の `465` は非対応 |
 | `EnableSsl` | STARTTLS を使用する場合 `true`。認証不要のローカル受信サーバーのみ `false` を使用 |
@@ -148,12 +149,26 @@ Development 環境では SMTP サーバーの応答・内部例外・スタッ�
 例えば `30` にすると発行から30分間有効になり、メール本文にも「発行から30分」と表示する。
 設定変更後はバックエンドを再起動する。0以下の値は起動時にエラーになる。
 変更後の期限は既存トークンの検証にも適用されるため、送信済みメールの説明とは異なる場合がある。
-この設定は Identity の標準 Data Protection トークンプロバイダーに適用する（現在、パスワード再設定は未実装）。
+この設定は Identity の標準 Data Protection トークンプロバイダーに適用する。
 リンクのフラグメントに格納し、確認画面のボタンから CSRF 対策付き POST で送る。
 メールスキャナーがリンクを開くだけでは確認済みにならない。
 Data Protection の鍵を保持しないと再起動後に既存リンクが無効になることがある。
 既存アカウントも `EmailConfirmed` が false ならログインできなくなるため、再送から確認を行う。
 既存の Identity テーブルを使用するので追加マイグレーションは不要。
+
+## パスワード再設定
+
+ログイン画面から「パスワードをお忘れですか?」で再設定依頼画面（`/forgot-password`）へ進み、登録済みメールアドレス宛に
+再設定リンクを送信する。未登録・確認済みなどのアカウント状態を判別できないよう、確認メールの再送と同じく常に同一の応答を返す。
+
+再設定トークンは確認メールとは別の名前付きトークンプロバイダーで発行し、有効期限は `Email:PasswordResetTokenLifespanMinutes`
+（既定 `30` 分）で指定する。リンクは確認メールと同様にフラグメントへ格納し（`/reset-password#userId=...&token=...`）、
+再設定画面のボタンから CSRF 対策付き POST で送る。
+
+再設定リンクを開けたことはメールアドレス所有の証明とみなし、再設定成功時に `EmailConfirmed` も `true` にする。
+また ASP.NET Core Identity は `ResetPasswordAsync` 実行時に `SecurityStamp` を自動更新するため、他デバイス・他セッションは
+既定の `SecurityStampValidator` 検証間隔（既定30分、未変更）以内に自動的に失効する。専用の全端末失効 API は実装していない。
+設計判断の詳細は [decisions/0006-password-reset-design.md](decisions/0006-password-reset-design.md) を参照する。
 
 ## ログイン機能
 
@@ -161,7 +176,7 @@ Data Protection の鍵を保持しないと再起動後に既存リンクが無�
 
 ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メールを送信し、ログイン画面へ移動する。メール内のリンクを開き、確認ボタンを押すまでログインできない。
 パスワードは12〜128文字で、大文字・小文字・数字・記号をそれぞれ含める。
-ログイン失敗5回で15分間ロックアウトする。パスワード再設定・MFA は未実装。
+ログイン失敗5回で15分間ロックアウトする。パスワード再設定は上記「パスワード再設定」を参照。MFA は未実装。
 
 | API | 動作 |
 | --- | --- |
@@ -169,6 +184,8 @@ ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メ�
 | `POST /api/auth/register` | `{ email, password }` で登録。成功 `201`、入力不備・登録不可 `400` |
 | `POST /api/auth/confirm-email` | `{ userId, token }` で確認。成功 `204`、無効・期限切れ `400` |
 | `POST /api/auth/resend-confirmation` | `{ email }` で再送。未登録・確認済みも同じ `200` 応答 |
+| `POST /api/auth/forgot-password` | `{ email }` でパスワード再設定を依頼。登録有無に関わらず同じ `200` 応答 |
+| `POST /api/auth/reset-password` | `{ userId, token, newPassword }` で再設定。成功 `204`、無効・期限切れ・ポリシー違反 `400` |
 | `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email, permissions }`、認証失敗 `401` |
 | `GET /api/auth/me` | 認証済みなら `200` と `{ id, email, permissions }`、未認証なら `401` |
 | `POST /api/auth/logout` | Cookie を削除し `204` |

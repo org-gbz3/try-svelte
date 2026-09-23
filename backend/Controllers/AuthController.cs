@@ -83,12 +83,69 @@ public class AuthController(UserManager<ApplicationUser> users,
         return Ok(new { message = "未確認のアカウントがある場合、確認メールを送信します。届かない場合は時間をおいて再試行してください。" });
     }
 
-    private async Task<bool> SendConfirmation(ApplicationUser user)
+    [EnableRateLimiting("auth")]
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword(EmailRequest request)
     {
-        try
+        var user = await users.FindByEmailAsync(request.Email.Trim());
+        if (user is not null)
+            await SendPasswordReset(user);
+        // 登録の有無・確認状態を応答で公開しない(resend-confirmationと同じ方針)。
+        return Ok(new { message = "登録されたメールアドレスの場合、パスワード再設定用のメールを送信します。届かない場合は時間をおいて再試行してください。" });
+    }
+
+    [EnableRateLimiting("auth")]
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword(ResetPasswordRequest request)
+    {
+        var user = await users.FindByIdAsync(request.UserId);
+        if (user is null)
+            return BadRequest(new { message = "再設定リンクが無効か期限切れです。もう一度お試しください。" });
+
+        // ResetPasswordAsync と、未確認アカウントを確認済みにする更新の2回SaveChangesが走るため、
+        // 途中で失敗しても中途半端な状態にならないよう明示的トランザクションで囲む(decisions/0002参照)。
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var result = await users.ResetPasswordAsync(user, request.Token, request.NewPassword);
+        if (!result.Succeeded)
+        {
+            var passwordError = result.Errors.Any(error => error.Code.StartsWith("Password"));
+            return BadRequest(new { message = passwordError
+                ? "パスワードは12文字以上で、大文字・小文字・数字・記号を含めてください。"
+                : "再設定リンクが無効か期限切れです。もう一度お試しください。" });
+        }
+        // 再設定メールのリンクを開けたことは、メール確認と同水準の所有証明とみなす。
+        if (!user.EmailConfirmed)
+        {
+            user.EmailConfirmed = true;
+            await users.UpdateAsync(user);
+        }
+        await transaction.CommitAsync();
+
+        // パスワード再設定によりSecurityStampが更新され、他セッションも既定の検証間隔で失効するが、
+        // このブラウザーのセッションは念のため即座に終了する。
+        await signIn.SignOutAsync();
+        return NoContent();
+    }
+
+    private Task<bool> SendConfirmation(ApplicationUser user) => SendEmailAsync(
+        "確認メール", async () =>
         {
             var token = await users.GenerateEmailConfirmationTokenAsync(user);
             await emailSender.SendAsync(user.Email!, user.Id, token);
+        });
+
+    private Task<bool> SendPasswordReset(ApplicationUser user) => SendEmailAsync(
+        "パスワード再設定メール", async () =>
+        {
+            var token = await users.GeneratePasswordResetTokenAsync(user);
+            await emailSender.SendPasswordResetAsync(user.Email!, user.Id, token);
+        });
+
+    private async Task<bool> SendEmailAsync(string emailKind, Func<Task> send)
+    {
+        try
+        {
+            await send();
             return true;
         }
         catch (Exception exception)
@@ -98,15 +155,15 @@ public class AuthController(UserManager<ApplicationUser> users,
             {
                 // SMTP 応答と内部例外が原因特定に必要なため、開発環境だけで詳細を記録する。
                 logger.LogError(exception,
-                    "確認メールの送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
-                    exception.GetType().Name, smtpStatus);
+                    "{EmailKind}の送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
+                    emailKind, exception.GetType().Name, smtpStatus);
             }
             else
             {
                 // SMTP 応答に宛先などが含まれる可能性があるため、本番では例外本文を記録しない。
                 logger.LogError(
-                    "確認メールの送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
-                    exception.GetType().Name, smtpStatus);
+                    "{EmailKind}の送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
+                    emailKind, exception.GetType().Name, smtpStatus);
             }
             return false;
         }
@@ -161,6 +218,11 @@ public class AuthController(UserManager<ApplicationUser> users,
         [Required, StringLength(4096)] string Token);
 
     public sealed record EmailRequest([Required, EmailAddress, StringLength(254)] string Email);
+
+    public sealed record ResetPasswordRequest(
+        [Required, StringLength(128)] string UserId,
+        [Required, StringLength(4096)] string Token,
+        [Required, StringLength(128)] string NewPassword);
 
     public sealed record Credentials(
         [Required, EmailAddress, StringLength(254)] string Email,

@@ -28,6 +28,8 @@ erDiagram
 | `login/` | ログイン | `POST /api/auth/login` | Read | `AspNetUsers`(+実効権限算出のため `AspNetUserRoles`/`RolePermissions`/`PermissionActions` を参照) |
 | `login/` | 確認メール再送 | `POST /api/auth/resend-confirmation` | Read | `AspNetUsers` |
 | `confirm-email/` | メールアドレス確認 | `POST /api/auth/confirm-email` | Update | `AspNetUsers`(`EmailConfirmed`) |
+| `forgot-password/` | パスワード再設定依頼 | `POST /api/auth/forgot-password` | Read | `AspNetUsers` |
+| `reset-password/` | パスワード再設定 | `POST /api/auth/reset-password` | Update | `AspNetUsers`(`PasswordHash`・`EmailConfirmed`・`SecurityStamp`) |
 | `+layout.svelte`(全画面共通) | ログイン状態確認 | `GET /api/auth/me` | Read | `AspNetUsers`(+実効権限算出のため `AspNetUserRoles`/`RolePermissions`/`PermissionActions` を参照) |
 | `+page.svelte`(トップ画面) | ログアウト | `POST /api/auth/logout` | - | DB操作なし(Cookie の失効のみ) |
 | 各画面の更新操作の直前 | CSRFトークン取得 | `GET /api/auth/csrf` | - | DB操作なし |
