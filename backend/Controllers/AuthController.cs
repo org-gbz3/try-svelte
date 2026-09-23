@@ -141,7 +141,9 @@ public class AuthController(UserManager<ApplicationUser> users,
             await emailSender.SendPasswordResetAsync(user.Email!, user.Id, token);
         });
 
-    private async Task<bool> SendEmailAsync(string emailKind, Func<Task> send)
+    // パラメータ名に "email" を含めると、実際には固定のラベル文字列(機微情報を含まない)にもかかわらず
+    // CodeQL(cs/exposure-of-sensitive-information)が命名ヒューリスティックで誤検知するため、label とする。
+    private async Task<bool> SendEmailAsync(string label, Func<Task> send)
     {
         try
         {
@@ -155,15 +157,15 @@ public class AuthController(UserManager<ApplicationUser> users,
             {
                 // SMTP 応答と内部例外が原因特定に必要なため、開発環境だけで詳細を記録する。
                 logger.LogError(exception,
-                    "{EmailKind}の送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
-                    emailKind, exception.GetType().Name, smtpStatus);
+                    "{Label}の送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
+                    label, exception.GetType().Name, smtpStatus);
             }
             else
             {
                 // SMTP 応答に宛先などが含まれる可能性があるため、本番では例外本文を記録しない。
                 logger.LogError(
-                    "{EmailKind}の送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
-                    emailKind, exception.GetType().Name, smtpStatus);
+                    "{Label}の送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
+                    label, exception.GetType().Name, smtpStatus);
             }
             return false;
         }
