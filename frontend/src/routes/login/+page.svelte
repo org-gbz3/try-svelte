@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { auth } from '$lib/auth.svelte';
+	import { auth, passkeysSupported } from '$lib/auth.svelte';
 
 	let email = $state('');
 	let password = $state('');
@@ -18,6 +18,22 @@
 		try { notice = await auth.resendConfirmation(email); }
 		catch (cause) { error = cause instanceof Error ? cause.message : '再送に失敗しました。'; }
 		finally { submitting = false; }
+	}
+
+	async function loginWithPasskey() {
+		if (submitting) return;
+		if (!email) { error = 'メールアドレスを入力してください'; return; }
+		error = '';
+		submitting = true;
+		try {
+			await auth.loginWithPasskey(email);
+			await goto('/');
+		} catch (cause) {
+			error = cause instanceof TypeError ? '通信に失敗しました。接続を確認してください。'
+				: cause instanceof Error ? cause.message : '処理に失敗しました。';
+		} finally {
+			submitting = false;
+		}
 	}
 
 	$effect(() => {
@@ -66,6 +82,9 @@
 				<p class="error" role="alert">{error}</p>
 			{/if}
 			<button type="submit" disabled={submitting}>ログイン</button>
+			{#if passkeysSupported()}
+				<button type="button" onclick={loginWithPasskey} disabled={submitting}>パスキーでログイン</button>
+			{/if}
 			<button type="button" onclick={resend} disabled={submitting}>確認メールを再送</button>
 		</form>
 		<p class="switch">アカウントをお持ちでない方は <a href="/signup">アカウント作成</a></p>

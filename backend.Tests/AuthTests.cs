@@ -594,6 +594,148 @@ public class AuthTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    // 実際の認証器による署名・検証は xUnit では再現できないため、以下はエンドポイント周辺の
+    // 振る舞い(認証・CSRF・レート制限・不正な入力の扱い)に限定して確認する。
+
+    [Fact(DisplayName = "未ログインではパスキー登録オプションを取得できない")]
+    public async Task PasskeyRegistrationOptionsRejectsAnonymousUser()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        using var response = await Post(client, "passkeys/registration-options");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "未ログインではパスキーを登録できない")]
+    public async Task RegisterPasskeyRejectsAnonymousUser()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        using var response = await Post(client, "passkeys", new { CredentialJson = "{}" });
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "未ログインではパスキー一覧を取得できない")]
+    public async Task ListPasskeysRejectsAnonymousUser()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        using var response = await client.GetAsync("/api/auth/passkeys");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "未ログインではパスキーを削除できない")]
+    public async Task RemovePasskeyRejectsAnonymousUser()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var csrf = await client.GetFromJsonAsync<Csrf>("/api/auth/csrf");
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/auth/passkeys/AAAA");
+        request.Headers.Add("X-CSRF-TOKEN", csrf!.Token);
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "パスキー登録オプションの取得にもCSRFトークンを要求する")]
+    public async Task PasskeyRegistrationOptionsRequiresCsrf()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+        using var response = await client.PostAsync("/api/auth/passkeys/registration-options", null);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "ログイン中はパスキー登録オプションを取得できる")]
+    public async Task PasskeyRegistrationOptionsAcceptsAuthenticatedUser()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+        using var response = await Post(client, "passkeys/registration-options");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact(DisplayName = "登録オプションの取得なしに不正な認証情報でパスキー登録すると拒否する")]
+    public async Task RegisterPasskeyRejectsInvalidCredentialWithoutPriorOptions()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+        using var response = await Post(client, "passkeys", new { CredentialJson = "{}" });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "ログイン直後はパスキーが1件も登録されていない")]
+    public async Task ListPasskeysReturnsEmptyForNewAccount()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+        using var response = await client.GetAsync("/api/auth/passkeys");
+        response.EnsureSuccessStatusCode();
+        var passkeys = await response.Content.ReadFromJsonAsync<List<object>>();
+        Assert.Empty(passkeys!);
+    }
+
+    [Fact(DisplayName = "存在しないパスキーの削除は冪等に成功する")]
+    public async Task RemovePasskeyIsIdempotentForUnknownCredential()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+        var csrf = await client.GetFromJsonAsync<Csrf>("/api/auth/csrf");
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/auth/passkeys/AAAA");
+        request.Headers.Add("X-CSRF-TOKEN", csrf!.Token);
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "パスキーログインオプションの取得は登録済み・未登録のどちらのメールアドレスでも200を返す")]
+    public async Task PasskeyLoginOptionsAcceptsAnyEmail()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await Register(client, factory);
+        using var registered = await Post(client, "passkeys/login-options", new { credentials.Email });
+        using var missing = await Post(client, "passkeys/login-options", new { Email = "missing@example.com" });
+        Assert.Equal(HttpStatusCode.OK, registered.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, missing.StatusCode);
+    }
+
+    [Fact(DisplayName = "パスキーログインオプションの取得にもCSRFトークンを要求する")]
+    public async Task PasskeyLoginOptionsRequiresCsrf()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        using var response = await client.PostAsJsonAsync("/api/auth/passkeys/login-options", new { Email = "user@example.com" });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "不正な認証情報でのパスキーログインを拒否する")]
+    public async Task PasskeyLoginRejectsInvalidCredential()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        using var response = await Post(client, "passkeys/login", new { CredentialJson = "{}" });
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "パスキーログインオプションへの過剰なリクエストはレート制限で拒否する")]
+    public async Task PasskeyLoginOptionsEnforcesRateLimit()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        HttpStatusCode lastStatus = HttpStatusCode.OK;
+        for (var i = 0; i < 21; i++)
+        {
+            using var response = await Post(client, "passkeys/login-options", new { Email = "user@example.com" });
+            lastStatus = response.StatusCode;
+        }
+        Assert.Equal(HttpStatusCode.TooManyRequests, lastStatus);
+    }
+
     private static Credentials CreateCredentials() => new("user@example.com", Password);
 
     // 前提条件の失敗を検証対象の失敗と混同しないよう、準備時にも応答を確認する。

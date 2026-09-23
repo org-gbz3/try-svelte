@@ -26,10 +26,11 @@ Identity はユーザー、パスワード、ロール、確認トークンな�
 | 管理者承認を必要とするか | 承認待ち状態と承認操作が必要。メールが届くことと利用資格があることは別に判定する | 管理者承認は未実装 |
 | 電話番号確認を必要とするか | 電話番号の登録・変更・確認コード配送が必要 | 電話番号確認は未実装 |
 | MFA を任意・必須のどちらにするか | パスワード成功後に追加認証へ進む。端末紛失時の復旧手段も必要 | MFA は未実装 |
+| パスワード以外のログイン手段を許可するか | パスキー(WebAuthn)を主認証手段として並立させると、資格情報の管理画面・登録上限・端末紛失時の失効手段が必要 | パスキーログインを実装(`SignInManager.PasskeySignInAsync`)。MFAではなくパスワードと並ぶ代替の主認証手段として位置づける。設計判断は [decisions/0007-passkey-authentication-design.md](decisions/0007-passkey-authentication-design.md) を参照 |
 
 `RequireConfirmedAccount` を有効にするだけで独自の管理者承認フローが完成するわけではない。承認の意味と判定を設計する。また、ログイン結果は成功・失敗だけでなく、確認条件未達、ロック中、追加認証要求などを考慮する。[Microsoft Learn: Identity の設定](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/identity-configuration?view=aspnetcore-10.0)
 
-現在のログイン API は `PasswordSignInAsync` の成功以外を同じ `401` にまとめる。将来 MFA を追加するときは、追加認証が必要な結果を専用フローへ分岐させる実装も必要になる。
+現在のログイン API は `PasswordSignInAsync`/`PasskeySignInAsync` の成功以外を同じ `401` にまとめる。将来 MFA を追加するときは、追加認証が必要な結果を専用フローへ分岐させる実装も必要になる。
 
 ## 3. 確認メールとトークン
 
@@ -96,6 +97,7 @@ Cookie 認証では、`SameSite` の設定だけに依存せず更新 API に CS
 | 方針として決めること | 必要になる挙動・実装 | このアプリの現状 |
 | --- | --- | --- |
 | パスワードを忘れた場合 | 再設定依頼、期限付きトークン、入力画面、登録状態を公開しない応答、再設定後のセッションの扱い | 実装済み。`/forgot-password` で依頼、`/reset-password` で再設定。確認メールと同じフラグメント配布・CSRF付きPOST・非開示応答の方針。詳細は [README.md の「パスワード再設定」](README.md#パスワード再設定)、経緯は [decisions/0006-password-reset-design.md](decisions/0006-password-reset-design.md) を参照 |
+| パスキー(WebAuthn)を主認証手段に追加する場合 | 資格情報の登録・一覧・削除画面、Relying Party ID の確定、本人確認レベルの選定 | 実装済み。ログイン済みユーザーのみ `/settings/passkeys` から追加登録でき、`/login` からパスキーでログインできる。MFA(下記「MFA 端末を紛失した場合」)や外部ログイン(下記)とは異なり、パスワードと並ぶ単独の主認証手段として実装している。詳細は [README.md の「パスキー(WebAuthn)ログイン」](README.md#パスキーwebauthnログイン)、経緯は [decisions/0007-passkey-authentication-design.md](decisions/0007-passkey-authentication-design.md) を参照 |
 | メールアドレス変更 | 新アドレスの確認、一意性検証、変更完了までの旧アドレスの扱い。このアプリではログイン名もメールなので `UserName` の更新方針も必要 | 未実装 |
 | MFA 端末を紛失した場合 | 回復コード等の代替手段、本人確認を伴うサポート手順 | 未実装 |
 | 利用停止と退会 | 新規ログインと既存セッションの拒否、データの削除・保持・匿名化、同じメールでの再登録可否 | 未実装 |

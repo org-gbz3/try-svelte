@@ -170,13 +170,32 @@ Data Protection の鍵を保持しないと再起動後に既存リンクが無�
 既定の `SecurityStampValidator` 検証間隔（既定30分、未変更）以内に自動的に失効する。専用の全端末失効 API は実装していない。
 設計判断の詳細は [decisions/0006-password-reset-design.md](decisions/0006-password-reset-design.md) を参照する。
 
+## パスキー(WebAuthn)ログイン
+
+パスワードに並ぶ代替のログイン手段として、ASP.NET Core Identity 標準のパスキー(WebAuthn/FIDO2)対応を使う。MFA(第2要素)ではなく、単独で使える主認証手段として実装している。ログイン済みユーザーが `/settings/passkeys` から追加登録する方式のみ提供し、パスワードレスでの新規アカウント作成には対応しない(パスワードによる復旧経路を必ず残すため)。
+
+`IdentityPasskeyOptions` は `backend/Program.cs` で構成する。Relying Party ID(`ServerDomain`)は Host ヘッダーからの暗黙推定に頼らず、`Email:PublicBaseUrl` のホスト名から明示的に導出する(本番ドメイン確定後に変更すると既存のパスキーが無効になるため)。本人確認(`UserVerificationRequirement`)は `"required"` とし、生体認証・PINなどを必須にする。`ResidentKeyRequirement` は `"preferred"` とし、発見可能な資格情報の作成を強制はしないが妨げない。1ユーザーあたりの登録上限は10件(DB枯渇対策)。
+
+パスキーは `AspNetUserPasskeys` テーブル(Identity組み込み)で管理するため、`dotnet ef database update` でのマイグレーション適用がテーブル作成前提になる。マイグレーション未適用のまま登録画面を公開すると登録が完了できない状態になるため、配備順序に注意する。
+
+| API | 動作 |
+| --- | --- |
+| `POST /api/auth/passkeys/registration-options`(要ログイン) | パスキー登録用のオプションを取得 |
+| `POST /api/auth/passkeys`(要ログイン) | `{ credentialJson, name }` で登録。成功 `201`、失敗・上限超過 `400` |
+| `GET /api/auth/passkeys`(要ログイン) | 登録済みパスキーの一覧を取得 |
+| `DELETE /api/auth/passkeys/{credentialId}`(要ログイン) | パスキーを削除。存在しないIDでも冪等に `204` |
+| `POST /api/auth/passkeys/login-options` | `{ email }` でログイン用オプションを取得 |
+| `POST /api/auth/passkeys/login` | `{ credentialJson }` で認証。成功 `200` と `{ id, email, permissions }`、失敗 `401` |
+
+**既知のトレードオフ**: `login-options` はメールアドレス指定でオプションを要求する方式のため、応答の内容(許可される認証情報の有無)からアカウントの存在・パスキー登録有無が、ブラウザー側の挙動を通じて推測されうる。これはWebAuthnの仕様上の制約であり、`resend-confirmation`/`forgot-password` で徹底している「応答からアカウント状態を判別できないようにする」方針とは完全には一致しない。設計判断の詳細は [decisions/0007-passkey-authentication-design.md](decisions/0007-passkey-authentication-design.md) を参照する。
+
 ## ログイン機能
 
 ユーザー管理で最初に決める方針と、それによるアプリの挙動は [ASP.NET_Core_Identity.md](ASP.NET_Core_Identity.md) を参照する。
 
 ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メールを送信し、ログイン画面へ移動する。メール内のリンクを開き、確認ボタンを押すまでログインできない。
 パスワードは12〜128文字で、大文字・小文字・数字・記号をそれぞれ含める。
-ログイン失敗5回で15分間ロックアウトする。パスワード再設定は上記「パスワード再設定」を参照。MFA は未実装。
+ログイン失敗5回で15分間ロックアウトする。パスワード再設定は上記「パスワード再設定」、パスキーでのログインは上記「パスキー(WebAuthn)ログイン」を参照。MFA は未実装。
 
 | API | 動作 |
 | --- | --- |
