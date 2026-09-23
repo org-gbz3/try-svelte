@@ -2,7 +2,7 @@
 
 ## 概要
 
-アカウント登録・メールアドレス確認・パスワード再設定・パスキー(WebAuthn)・ログイン/ログアウトと、ログイン中ユーザーの実効権限取得を扱う。権限キーによる保護対象ではなく、`GET /api/auth/me` とパスキーの登録・一覧・削除系エンドポイント(`/api/auth/passkeys`・`/api/auth/passkeys/registration-options`・`/api/auth/passkeys/{credentialId}`)のみ `[Authorize]` で保護する(それ以外は未ログインでも呼べる。パスキーのログイン系エンドポイントは未ログイン状態で使うため保護しない)。実効権限の算出方法は [decisions/0003](../../decisions/0003-expose-effective-permissions-in-me.md) を参照。パスキーの設計判断は [decisions/0007](../../decisions/0007-passkey-authentication-design.md) を参照。
+アカウント登録・メールアドレス確認・パスワード再設定・パスキー(WebAuthn)・MFA(TOTP)・ログイン/ログアウトと、ログイン中ユーザーの実効権限取得を扱う。権限キーによる保護対象ではなく、`GET /api/auth/me`、パスキーの登録・一覧・削除系エンドポイント(`/api/auth/passkeys`・`/api/auth/passkeys/registration-options`・`/api/auth/passkeys/{credentialId}`)、MFA設定系エンドポイント(`/api/auth/mfa/status`・`/api/auth/mfa/setup`・`/api/auth/mfa/enable`・`/api/auth/mfa/disable`・`/api/auth/mfa/recovery-codes`)のみ `[Authorize]` で保護する(それ以外は未ログインでも呼べる。パスキー・MFAのログイン継続系エンドポイントはログイン途中の状態で使うため保護しない)。実効権限の算出方法は [decisions/0003](../../decisions/0003-expose-effective-permissions-in-me.md) を参照。パスキーの設計判断は [decisions/0007](../../decisions/0007-passkey-authentication-design.md)、MFAの設計判断は [decisions/0008](../../decisions/0008-totp-mfa-design.md) を参照。
 
 ## ER図
 
@@ -14,6 +14,7 @@ erDiagram
         string NormalizedEmail
         string PasswordHash
         bool EmailConfirmed
+        bool TwoFactorEnabled "MFA(TOTP)の有効状態(decisions/0008参照)"
         datetime CreatedAt "NULL可(登録日時不明、decisions/0004参照)"
     }
     AspNetUserPasskeys {
@@ -21,10 +22,17 @@ erDiagram
         string UserId FK
         string Data "公開鍵・署名カウンター等をIdentityが管理(decisions/0007参照)"
     }
+    AspNetUserTokens {
+        string UserId FK
+        string LoginProvider "Identity内部のプロバイダー名"
+        string Name "AuthenticatorKey / RecoveryCodes"
+        string Value
+    }
     AspNetUsers ||--o{ AspNetUserPasskeys : "登録する"
+    AspNetUsers ||--o{ AspNetUserTokens : "保持する"
 ```
 
-`AspNetUserPasskeys` は ASP.NET Core Identity 組み込みのパスキー(WebAuthn)ストアが管理するテーブルで、カスタムエンティティは定義していない([decisions/0007](../../decisions/0007-passkey-authentication-design.md)参照)。
+`AspNetUserPasskeys` は ASP.NET Core Identity 組み込みのパスキー(WebAuthn)ストアが管理するテーブルで、カスタムエンティティは定義していない([decisions/0007](../../decisions/0007-passkey-authentication-design.md)参照)。`AspNetUserTokens` も同様にIdentity組み込みのテーブルで、TOTPの秘密鍵(`AuthenticatorKey`)とハッシュ化されたリカバリーコード(`RecoveryCodes`)を格納する。MFA用のカスタムエンティティ・マイグレーションは追加していない([decisions/0008](../../decisions/0008-totp-mfa-design.md)参照)。
 
 `GET /api/auth/login`・`GET /api/auth/me` が返す実効権限マップは `AspNetUserRoles`・`RolePermissions`・`PermissionActions` を横断して算出する(参照のみ、このドメインでは更新しない)。テーブルの詳細は [admin-roles](admin-roles.md)・[admin-user-roles](admin-user-roles.md) を参照。
 
@@ -44,6 +52,13 @@ erDiagram
 | `settings/passkeys/` | パスキー登録 | `POST /api/auth/passkeys` | Create | `AspNetUserPasskeys` |
 | `settings/passkeys/` | パスキー一覧取得 | `GET /api/auth/passkeys` | Read | `AspNetUserPasskeys` |
 | `settings/passkeys/` | パスキー削除 | `DELETE /api/auth/passkeys/{credentialId}` | Delete | `AspNetUserPasskeys` |
+| `login/` | 追加認証コードでログイン | `POST /api/auth/login/verify-2fa` | Read | `AspNetUsers`・`AspNetUserTokens` |
+| `login/` | リカバリーコードでログイン | `POST /api/auth/login/verify-recovery-code` | Update | `AspNetUsers`・`AspNetUserTokens`(使用済みコードの消費) |
+| `settings/mfa/` | MFA状態取得 | `GET /api/auth/mfa/status` | Read | `AspNetUsers`・`AspNetUserTokens` |
+| `settings/mfa/` | MFAセットアップ開始 | `POST /api/auth/mfa/setup` | Update | `AspNetUserTokens`(`AuthenticatorKey`) |
+| `settings/mfa/` | MFA有効化 | `POST /api/auth/mfa/enable` | Update | `AspNetUsers`(`TwoFactorEnabled`)・`AspNetUserTokens`(`RecoveryCodes`) |
+| `settings/mfa/` | MFA無効化 | `POST /api/auth/mfa/disable` | Update | `AspNetUsers`(`TwoFactorEnabled`)・`AspNetUserTokens`(`AuthenticatorKey`) |
+| `settings/mfa/` | リカバリーコード再生成 | `POST /api/auth/mfa/recovery-codes` | Update | `AspNetUserTokens`(`RecoveryCodes`) |
 | `+layout.svelte`(全画面共通) | ログイン状態確認 | `GET /api/auth/me` | Read | `AspNetUsers`(+実効権限算出のため `AspNetUserRoles`/`RolePermissions`/`PermissionActions` を参照) |
 | `+page.svelte`(トップ画面) | ログアウト | `POST /api/auth/logout` | - | DB操作なし(Cookie の失効のみ) |
 | 各画面の更新操作の直前 | CSRFトークン取得 | `GET /api/auth/csrf` | - | DB操作なし |

@@ -177,9 +177,163 @@ public class AuthController(UserManager<ApplicationUser> users,
         var result = user is null
             ? Microsoft.AspNetCore.Identity.SignInResult.Failed
             : await signIn.PasswordSignInAsync(user, request.Password, isPersistent: false, lockoutOnFailure: true);
+
+        // パスワードは正しいが追加認証が必要。この時点でIdentityは既に一時的な2FA保留Cookieを発行済み。
+        // 401にすると apiFetch の「401で認証状態を匿名化する」副作用と衝突し、パスワード誤りとも
+        // 区別できなくなるため、200 OK+フラグで明示的に分岐させる(decisions/0008参照)。
+        if (result.RequiresTwoFactor)
+            return Ok(new { requiresTwoFactor = true });
+
         if (!result.Succeeded)
             return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
         return Ok(new { id = user!.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
+    }
+
+    [EnableRateLimiting("auth")]
+    [HttpPost("login/verify-2fa")]
+    public async Task<IActionResult> VerifyTwoFactor(TwoFactorCodeRequest request)
+    {
+        var user = await signIn.GetTwoFactorAuthenticationUserAsync();
+        if (user is null)
+            return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
+
+        var code = request.Code.Replace(" ", "").Replace("-", "");
+        var result = await signIn.TwoFactorAuthenticatorSignInAsync(code, isPersistent: false, rememberClient: false);
+        if (!result.Succeeded)
+            return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
+        return Ok(new { id = user.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
+    }
+
+    [EnableRateLimiting("auth")]
+    [HttpPost("login/verify-recovery-code")]
+    public async Task<IActionResult> VerifyRecoveryCode(RecoveryCodeRequest request)
+    {
+        var user = await signIn.GetTwoFactorAuthenticationUserAsync();
+        if (user is null)
+            return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
+
+        var result = await signIn.TwoFactorRecoveryCodeSignInAsync(request.Code.Trim());
+        if (!result.Succeeded)
+            return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
+        return Ok(new { id = user.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
+    }
+
+    [EnableRateLimiting("auth")]
+    [Authorize]
+    [HttpGet("mfa/status")]
+    public async Task<IActionResult> MfaStatus()
+    {
+        var user = await users.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+        return Ok(new
+        {
+            enabled = user.TwoFactorEnabled,
+            recoveryCodesRemaining = user.TwoFactorEnabled ? await users.CountRecoveryCodesAsync(user) : 0
+        });
+    }
+
+    [EnableRateLimiting("auth")]
+    [Authorize]
+    [HttpPost("mfa/setup")]
+    public async Task<IActionResult> SetupMfa()
+    {
+        var user = await users.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+        if (user.TwoFactorEnabled)
+            return BadRequest(new { message = "MFAは既に有効です。無効化してから再設定してください。" });
+
+        // 未確定のセットアップ(スキャン後に確認コードを入力せず離脱した等)を毎回破棄し、常に新しい鍵を発行する。
+        // TwoFactorEnabled=falseの間は有効な秘密鍵として使われていないため、都度リセットしても安全。
+        await users.ResetAuthenticatorKeyAsync(user);
+        var unformattedKey = await users.GetAuthenticatorKeyAsync(user);
+
+        var issuer = users.Options.Tokens.AuthenticatorIssuer;
+        var otpauthUri = $"otpauth://totp/{Uri.EscapeDataString(issuer)}:{Uri.EscapeDataString(user.Email!)}" +
+                          $"?secret={unformattedKey}&issuer={Uri.EscapeDataString(issuer)}&digits=6";
+
+        return Ok(new { sharedKey = FormatKey(unformattedKey!), otpauthUri });
+    }
+
+    [EnableRateLimiting("auth")]
+    [Authorize]
+    [HttpPost("mfa/enable")]
+    public async Task<IActionResult> EnableMfa(EnableMfaRequest request)
+    {
+        var user = await users.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+        if (user.TwoFactorEnabled)
+            return BadRequest(new { message = "MFAは既に有効です。" });
+
+        var code = request.Code.Replace(" ", "").Replace("-", "");
+        var valid = await users.VerifyTwoFactorTokenAsync(user, users.Options.Tokens.AuthenticatorTokenProvider!, code);
+        if (!valid)
+            return BadRequest(new { message = "コードが正しくありません。もう一度お試しください。" });
+
+        // SetTwoFactorEnabledAsync と GenerateNewTwoFactorRecoveryCodesAsync の2回SaveChangesAsyncが走るため、
+        // 明示トランザクションで囲む(decisions/0002参照)。
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        await users.SetTwoFactorEnabledAsync(user, true);
+        var recoveryCodes = await users.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+        await transaction.CommitAsync();
+
+        return Ok(new { recoveryCodes });
+    }
+
+    [EnableRateLimiting("auth")]
+    [Authorize]
+    [HttpPost("mfa/disable")]
+    public async Task<IActionResult> DisableMfa(ReauthRequest request)
+    {
+        var user = await users.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+
+        // 認証アプリを紛失していても無効化できるよう、TOTPコードではなくパスワードで再認証する。
+        var reauth = await signIn.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true);
+        if (!reauth.Succeeded)
+            return BadRequest(new { message = "現在のパスワードが正しくありません。" });
+
+        // SetTwoFactorEnabledAsync と ResetAuthenticatorKeyAsync の2回SaveChangesAsyncが走るため、
+        // 明示トランザクションで囲む(decisions/0002参照)。
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        await users.SetTwoFactorEnabledAsync(user, false);
+        // 秘密鍵を破棄し、誤って再有効化されても古い鍵が使い回されないようにする。
+        await users.ResetAuthenticatorKeyAsync(user);
+        await transaction.CommitAsync();
+
+        return NoContent();
+    }
+
+    [EnableRateLimiting("auth")]
+    [Authorize]
+    [HttpPost("mfa/recovery-codes")]
+    public async Task<IActionResult> RegenerateRecoveryCodes(ReauthRequest request)
+    {
+        var user = await users.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+        if (!user.TwoFactorEnabled)
+            return BadRequest(new { message = "MFAが有効なときのみ実行できます。" });
+
+        var reauth = await signIn.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true);
+        if (!reauth.Succeeded)
+            return BadRequest(new { message = "現在のパスワードが正しくありません。" });
+
+        // 1回のSaveChangesAsyncで完結するため明示トランザクション不要(decisions/0002参照)。
+        var recoveryCodes = await users.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+        return Ok(new { recoveryCodes });
+    }
+
+    // 手動入力用に4文字ごとにスペースを挿入する(Identity UI scaffoldingの表示形式に合わせる)。
+    private static string FormatKey(string unformattedKey)
+    {
+        var result = new System.Text.StringBuilder();
+        var remaining = unformattedKey;
+        while (remaining.Length > 0)
+        {
+            var chunkLength = Math.Min(4, remaining.Length);
+            result.Append(remaining[..chunkLength]).Append(' ');
+            remaining = remaining[chunkLength..];
+        }
+        return result.ToString().TrimEnd();
     }
 
     private const int MaxPasskeysPerUser = 10;
@@ -366,4 +520,12 @@ public class AuthController(UserManager<ApplicationUser> users,
     public sealed record Credentials(
         [Required, EmailAddress, StringLength(254)] string Email,
         [Required, StringLength(128)] string Password);
+
+    public sealed record TwoFactorCodeRequest([Required, StringLength(6, MinimumLength = 6)] string Code);
+
+    public sealed record RecoveryCodeRequest([Required, StringLength(32)] string Code);
+
+    public sealed record ReauthRequest([Required, StringLength(128)] string Password);
+
+    public sealed record EnableMfaRequest([Required, StringLength(6, MinimumLength = 6)] string Code);
 }

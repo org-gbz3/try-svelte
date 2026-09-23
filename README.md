@@ -189,13 +189,35 @@ Data Protection の鍵を保持しないと再起動後に既存リンクが無�
 
 **既知のトレードオフ**: `login-options` はメールアドレス指定でオプションを要求する方式のため、応答の内容(許可される認証情報の有無)からアカウントの存在・パスキー登録有無が、ブラウザー側の挙動を通じて推測されうる。これはWebAuthnの仕様上の制約であり、`resend-confirmation`/`forgot-password` で徹底している「応答からアカウント状態を判別できないようにする」方針とは完全には一致しない。設計判断の詳細は [decisions/0007-passkey-authentication-design.md](decisions/0007-passkey-authentication-design.md) を参照する。
 
+## 二段階認証(MFA)
+
+パスワード認証への追加要素として、ASP.NET Core Identity 標準のTOTP(認証アプリ)対応を使う。全ユーザーが `/settings/mfa` から任意で有効化するセルフサービス方式で、管理者による強制はない。端末を記憶してMFAを一定期間スキップする機能は提供せず、毎回コードを要求する。
+
+有効化していないアカウントはこれまで通りパスワードのみでログインする。有効化したアカウントは、`POST /api/auth/login` が `{ requiresTwoFactor: true }` を返した後、`/api/auth/login/verify-2fa` に6桁コードを送って本ログインを完了する。認証アプリを利用できない場合は、有効化時に発行される10件のリカバリーコード(使い捨て)を `/api/auth/login/verify-recovery-code` に送ることでも完了できる。
+
+**パスキーとの関係**: パスキー(WebAuthn)でのログインはパスワード成功後の2要素判定を経由しないため、MFAを有効にしていてもTOTPコードを要求しない。これは [decisions/0007](decisions/0007-passkey-authentication-design.md) の「パスキーはMFAとして実装しない」という決定と整合する既知の挙動であり、`/settings/mfa` 画面にも明記する。
+
+無効化・リカバリーコードの再生成には現在のパスワードでの再認証が必要(TOTPコードではない。認証アプリを紛失していても無効化できるようにするため)。
+
+| API | 動作 |
+| --- | --- |
+| `POST /api/auth/login/verify-2fa`(ログイン継続) | `{ code }` で認証。成功 `200` と `{ id, email, permissions }`、失敗 `401` |
+| `POST /api/auth/login/verify-recovery-code`(ログイン継続) | `{ code }` で認証(使い捨て)。成功 `200`、失敗 `401` |
+| `GET /api/auth/mfa/status`(要ログイン) | `{ enabled, recoveryCodesRemaining }` を取得 |
+| `POST /api/auth/mfa/setup`(要ログイン) | 新しい秘密鍵を発行し `{ sharedKey, otpauthUri }` を返す。有効化済みは `400` |
+| `POST /api/auth/mfa/enable`(要ログイン) | `{ code }` で確認コードを検証し有効化。成功 `200` と `{ recoveryCodes }`(10件、この応答でのみ表示) |
+| `POST /api/auth/mfa/disable`(要ログイン) | `{ password }` で再認証して無効化。成功 `204`、パスワード誤り `400` |
+| `POST /api/auth/mfa/recovery-codes`(要ログイン) | `{ password }` で再認証してリカバリーコードを再生成。成功 `200` と `{ recoveryCodes }` |
+
+設計判断の詳細は [decisions/0008-totp-mfa-design.md](decisions/0008-totp-mfa-design.md) を参照する。
+
 ## ログイン機能
 
 ユーザー管理で最初に決める方針と、それによるアプリの挙動は [ASP.NET_Core_Identity.md](ASP.NET_Core_Identity.md) を参照する。
 
 ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メールを送信し、ログイン画面へ移動する。メール内のリンクを開き、確認ボタンを押すまでログインできない。
 パスワードは12〜128文字で、大文字・小文字・数字・記号をそれぞれ含める。
-ログイン失敗5回で15分間ロックアウトする。パスワード再設定は上記「パスワード再設定」、パスキーでのログインは上記「パスキー(WebAuthn)ログイン」を参照。MFA は未実装。
+ログイン失敗5回で15分間ロックアウトする。パスワード再設定は上記「パスワード再設定」、パスキーでのログインは上記「パスキー(WebAuthn)ログイン」、MFAは上記「二段階認証(MFA)」を参照。
 
 | API | 動作 |
 | --- | --- |
@@ -205,7 +227,7 @@ ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メ�
 | `POST /api/auth/resend-confirmation` | `{ email }` で再送。未登録・確認済みも同じ `200` 応答 |
 | `POST /api/auth/forgot-password` | `{ email }` でパスワード再設定を依頼。登録有無に関わらず同じ `200` 応答 |
 | `POST /api/auth/reset-password` | `{ userId, token, newPassword }` で再設定。成功 `204`、無効・期限切れ・ポリシー違反 `400` |
-| `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email, permissions }`、認証失敗 `401` |
+| `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email, permissions }`、MFA有効なら `200` と `{ requiresTwoFactor: true }`、認証失敗 `401` |
 | `GET /api/auth/me` | 認証済みなら `200` と `{ id, email, permissions }`、未認証なら `401` |
 | `POST /api/auth/logout` | Cookie を削除し `204` |
 

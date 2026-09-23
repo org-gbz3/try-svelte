@@ -19,11 +19,15 @@
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@testing-library/svelte": "^5.4.2",
 		"@types/node": "^26.4.1",
+		"@types/qrcode": "^1.5.6",
 		"jsdom": "^30.0.1",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",
 		"typescript": "^6.0.3",
 		"vite": "^8.0.16",
 		"vitest": "^5.0.0"
+	},
+	"dependencies": {
+		"qrcode": "^1.5.4"
 	}
 }
