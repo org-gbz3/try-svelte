@@ -4,3 +4,8 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      # init/autobuild/analyze は同一バージョンでないと実行時に設定ファイルの不一致で失敗するため、1つの PR にまとめる
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"

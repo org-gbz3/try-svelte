@@ -19,7 +19,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ javascript-typescript, csharp ]
+        # overlay(差分)解析は build-mode: none でのみ有効になるため、両言語とも none を明示する。経緯は decisions/0009 を参照
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: csharp
+            build-mode: none
 
     steps:
       - name: Checkout repository
@@ -35,9 +40,7 @@ jobs:
         uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63  # github/codeql-action/init@v4.38.0
         with:
           languages: ${{ matrix.language }}
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@b96794f015dfd88f77b49b1c93e0fa7110f94c63  # github/codeql-action/autobuild@v4.38.0
+          build-mode: ${{ matrix.build-mode }}
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63  # github/codeql-action/analyze@v4.38.0
