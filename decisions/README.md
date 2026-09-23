@@ -50,3 +50,5 @@
 | [0003](0003-expose-effective-permissions-in-me.md) | /api/auth/me での実効権限マップの返却 | 採用 |
 | [0004](0004-admin-user-list-design.md) | 管理者向けユーザー一覧画面の設計 | 採用 |
 | [0005](0005-user-list-email-search-options.md) | ユーザー一覧のメール検索オプション(前方一致・大文字小文字区別)の実装方式 | 採用 |
+| [0006](0006-password-reset-design.md) | パスワード再設定機能の設計 | 採用 |
+| [0007](0007-passkey-authentication-design.md) | パスキー(WebAuthn)認証の設計 | 採用 |

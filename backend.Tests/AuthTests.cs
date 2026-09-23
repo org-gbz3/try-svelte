@@ -435,6 +435,307 @@ public class AuthTests
         Assert.Single(factory.Sender.Messages);
     }
 
+    [Fact(DisplayName = "登録済みアカウントへの再設定依頼でパスワード再設定メールを送信する")]
+    public async Task ForgotPasswordSendsResetEmailForRegisteredAccount()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await Register(client, factory);
+        using var response = await Post(client, "forgot-password", new { credentials.Email });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Single(factory.Sender.PasswordResetMessages);
+    }
+
+    [Fact(DisplayName = "登録済みと未登録の再設定依頼は同じ応答でメールを送らない")]
+    public async Task ForgotPasswordDoesNotDiscloseAccount()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await Register(client, factory);
+        using var registered = await Post(client, "forgot-password", new { credentials.Email });
+        using var missing = await Post(client, "forgot-password", new { Email = "missing@example.com" });
+        Assert.Equal(HttpStatusCode.OK, registered.StatusCode);
+        Assert.Equal(registered.StatusCode, missing.StatusCode);
+        Assert.Equal(await registered.Content.ReadAsStringAsync(), await missing.Content.ReadAsStringAsync());
+        Assert.Single(factory.Sender.PasswordResetMessages);
+    }
+
+    [Fact(DisplayName = "パスワード再設定依頼にもCSRFトークンを要求する")]
+    public async Task ForgotPasswordRequiresCsrf()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await Register(client, factory);
+        using var response = await client.PostAsJsonAsync("/api/auth/forgot-password", new { credentials.Email });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "パスワード再設定依頼への過剰なリクエストはレート制限で拒否する")]
+    public async Task ForgotPasswordEnforcesRateLimit()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        HttpStatusCode lastStatus = HttpStatusCode.OK;
+        for (var i = 0; i < 21; i++)
+        {
+            using var response = await Post(client, "forgot-password", new { Email = "user@example.com" });
+            lastStatus = response.StatusCode;
+        }
+        Assert.Equal(HttpStatusCode.TooManyRequests, lastStatus);
+    }
+
+    [Fact(DisplayName = "再設定した新しいパスワードでログインでき、古いパスワードではログインできない")]
+    public async Task ResetPasswordAllowsLoginWithNewPassword()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await Register(client, factory);
+        var mail = await RequestPasswordReset(client, factory, credentials.Email);
+        const string newPassword = "New-password-456!";
+        using var reset = await Post(client, "reset-password", new { mail.UserId, mail.Token, NewPassword = newPassword });
+        Assert.Equal(HttpStatusCode.NoContent, reset.StatusCode);
+
+        using var oldLogin = await Post(client, "login", credentials);
+        Assert.Equal(HttpStatusCode.Unauthorized, oldLogin.StatusCode);
+
+        using var newLogin = await Post(client, "login", credentials with { Password = newPassword });
+        Assert.Equal(HttpStatusCode.OK, newLogin.StatusCode);
+    }
+
+    [Fact(DisplayName = "改ざんされた再設定トークンを拒否する")]
+    public async Task ResetPasswordRejectsInvalidToken()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await Register(client, factory);
+        var mail = await RequestPasswordReset(client, factory, credentials.Email);
+        using var response = await Post(client, "reset-password",
+            new { mail.UserId, Token = mail.Token + "invalid", NewPassword = "New-password-456!" });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "期限切れの再設定トークンを拒否する")]
+    public async Task ResetPasswordRejectsExpiredToken()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await Register(client, factory);
+        factory.Services.GetRequiredService<IOptions<PasswordResetTokenProviderOptions>>().Value.TokenLifespan = TimeSpan.FromSeconds(-1);
+        var mail = await RequestPasswordReset(client, factory, credentials.Email);
+        using var response = await Post(client, "reset-password", new { mail.UserId, mail.Token, NewPassword = "New-password-456!" });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "パスワード再設定にもCSRFトークンを要求する")]
+    public async Task ResetPasswordRequiresCsrf()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await Register(client, factory);
+        var mail = await RequestPasswordReset(client, factory, credentials.Email);
+        using var response = await client.PostAsJsonAsync("/api/auth/reset-password",
+            new { mail.UserId, mail.Token, NewPassword = "New-password-456!" });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "弱いパスワードでの再設定を拒否する")]
+    public async Task ResetPasswordRejectsWeakPassword()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await Register(client, factory);
+        var mail = await RequestPasswordReset(client, factory, credentials.Email);
+        using var response = await Post(client, "reset-password", new { mail.UserId, mail.Token, NewPassword = "short" });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "未確認アカウントも再設定成功時にメール確認済みになる")]
+    public async Task ResetPasswordConfirmsUnconfirmedEmail()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        using var registration = await Post(client, "register", CreateCredentials());
+        registration.EnsureSuccessStatusCode();
+        var mail = await RequestPasswordReset(client, factory, CreateCredentials().Email);
+        const string newPassword = "New-password-456!";
+        using var reset = await Post(client, "reset-password", new { mail.UserId, mail.Token, NewPassword = newPassword });
+        Assert.Equal(HttpStatusCode.NoContent, reset.StatusCode);
+
+        Assert.True(await factory.IsEmailConfirmedAsync(CreateCredentials().Email));
+
+        using var login = await Post(client, "login", CreateCredentials() with { Password = newPassword });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+    }
+
+    [Fact(DisplayName = "再設定成功時にSecurityStampが更新され他セッションが失効対象になる")]
+    public async Task ResetPasswordRotatesSecurityStamp()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await Register(client, factory);
+        var stampBefore = await factory.GetSecurityStampAsync(credentials.Email);
+        var mail = await RequestPasswordReset(client, factory, credentials.Email);
+        using var reset = await Post(client, "reset-password", new { mail.UserId, mail.Token, NewPassword = "New-password-456!" });
+        reset.EnsureSuccessStatusCode();
+        var stampAfter = await factory.GetSecurityStampAsync(credentials.Email);
+        Assert.NotEqual(stampBefore, stampAfter);
+    }
+
+    [Fact(DisplayName = "再設定成功時に現在のブラウザーセッションもログアウトする")]
+    public async Task ResetPasswordSignsOutCurrentSession()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await RegisterAndLogin(client, factory);
+        var mail = await RequestPasswordReset(client, factory, credentials.Email);
+        using var reset = await Post(client, "reset-password", new { mail.UserId, mail.Token, NewPassword = "New-password-456!" });
+        reset.EnsureSuccessStatusCode();
+        using var response = await client.GetAsync("/api/auth/me");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    // 実際の認証器による署名・検証は xUnit では再現できないため、以下はエンドポイント周辺の
+    // 振る舞い(認証・CSRF・レート制限・不正な入力の扱い)に限定して確認する。
+
+    [Fact(DisplayName = "未ログインではパスキー登録オプションを取得できない")]
+    public async Task PasskeyRegistrationOptionsRejectsAnonymousUser()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        using var response = await Post(client, "passkeys/registration-options");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "未ログインではパスキーを登録できない")]
+    public async Task RegisterPasskeyRejectsAnonymousUser()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        using var response = await Post(client, "passkeys", new { CredentialJson = "{}" });
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "未ログインではパスキー一覧を取得できない")]
+    public async Task ListPasskeysRejectsAnonymousUser()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        using var response = await client.GetAsync("/api/auth/passkeys");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "未ログインではパスキーを削除できない")]
+    public async Task RemovePasskeyRejectsAnonymousUser()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var csrf = await client.GetFromJsonAsync<Csrf>("/api/auth/csrf");
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/auth/passkeys/AAAA");
+        request.Headers.Add("X-CSRF-TOKEN", csrf!.Token);
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "パスキー登録オプションの取得にもCSRFトークンを要求する")]
+    public async Task PasskeyRegistrationOptionsRequiresCsrf()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+        using var response = await client.PostAsync("/api/auth/passkeys/registration-options", null);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "ログイン中はパスキー登録オプションを取得できる")]
+    public async Task PasskeyRegistrationOptionsAcceptsAuthenticatedUser()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+        using var response = await Post(client, "passkeys/registration-options");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact(DisplayName = "登録オプションの取得なしに不正な認証情報でパスキー登録すると拒否する")]
+    public async Task RegisterPasskeyRejectsInvalidCredentialWithoutPriorOptions()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+        using var response = await Post(client, "passkeys", new { CredentialJson = "{}" });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "ログイン直後はパスキーが1件も登録されていない")]
+    public async Task ListPasskeysReturnsEmptyForNewAccount()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+        using var response = await client.GetAsync("/api/auth/passkeys");
+        response.EnsureSuccessStatusCode();
+        var passkeys = await response.Content.ReadFromJsonAsync<List<object>>();
+        Assert.Empty(passkeys!);
+    }
+
+    [Fact(DisplayName = "存在しないパスキーの削除は冪等に成功する")]
+    public async Task RemovePasskeyIsIdempotentForUnknownCredential()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        await RegisterAndLogin(client, factory);
+        var csrf = await client.GetFromJsonAsync<Csrf>("/api/auth/csrf");
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/auth/passkeys/AAAA");
+        request.Headers.Add("X-CSRF-TOKEN", csrf!.Token);
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "パスキーログインオプションの取得は登録済み・未登録のどちらのメールアドレスでも200を返す")]
+    public async Task PasskeyLoginOptionsAcceptsAnyEmail()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        var credentials = await Register(client, factory);
+        using var registered = await Post(client, "passkeys/login-options", new { credentials.Email });
+        using var missing = await Post(client, "passkeys/login-options", new { Email = "missing@example.com" });
+        Assert.Equal(HttpStatusCode.OK, registered.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, missing.StatusCode);
+    }
+
+    [Fact(DisplayName = "パスキーログインオプションの取得にもCSRFトークンを要求する")]
+    public async Task PasskeyLoginOptionsRequiresCsrf()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        using var response = await client.PostAsJsonAsync("/api/auth/passkeys/login-options", new { Email = "user@example.com" });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "不正な認証情報でのパスキーログインを拒否する")]
+    public async Task PasskeyLoginRejectsInvalidCredential()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        using var response = await Post(client, "passkeys/login", new { CredentialJson = "{}" });
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "パスキーログインオプションへの過剰なリクエストはレート制限で拒否する")]
+    public async Task PasskeyLoginOptionsEnforcesRateLimit()
+    {
+        using var factory = new AuthFactory();
+        using var client = factory.CreateClient();
+        HttpStatusCode lastStatus = HttpStatusCode.OK;
+        for (var i = 0; i < 21; i++)
+        {
+            using var response = await Post(client, "passkeys/login-options", new { Email = "user@example.com" });
+            lastStatus = response.StatusCode;
+        }
+        Assert.Equal(HttpStatusCode.TooManyRequests, lastStatus);
+    }
+
     private static Credentials CreateCredentials() => new("user@example.com", Password);
 
     // 前提条件の失敗を検証対象の失敗と混同しないよう、準備時にも応答を確認する。
@@ -457,6 +758,14 @@ public class AuthTests
         return credentials;
     }
 
+    private static async Task<(string Email, string UserId, string Token)> RequestPasswordReset(
+        HttpClient client, AuthFactory factory, string email)
+    {
+        using var response = await Post(client, "forgot-password", new { email });
+        response.EnsureSuccessStatusCode();
+        return Assert.Single(factory.Sender.PasswordResetMessages);
+    }
+
     private static async Task<HttpResponseMessage> Post(HttpClient client, string endpoint, object? body = null)
     {
         var csrf = await client.GetFromJsonAsync<Csrf>("/api/auth/csrf");
@@ -473,11 +782,18 @@ public class AuthTests
     private sealed class RecordingEmailSender : IConfirmationEmailSender
     {
         public List<(string Email, string UserId, string Token)> Messages { get; } = [];
+        public List<(string Email, string UserId, string Token)> PasswordResetMessages { get; } = [];
         public bool Fail { get; set; }
         public Task SendAsync(string email, string userId, string token)
         {
             if (Fail) throw new InvalidOperationException("テスト用の送信失敗");
             Messages.Add((email, userId, token));
+            return Task.CompletedTask;
+        }
+        public Task SendPasswordResetAsync(string email, string userId, string token)
+        {
+            if (Fail) throw new InvalidOperationException("テスト用の送信失敗");
+            PasswordResetMessages.Add((email, userId, token));
             return Task.CompletedTask;
         }
     }
@@ -536,6 +852,22 @@ public class AuthTests
             var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
             var user = await users.FindByEmailAsync(email) ?? throw new InvalidOperationException("ユーザーが見つかりません。");
             return user.CreatedAt;
+        }
+
+        public async Task<bool> IsEmailConfirmedAsync(string email)
+        {
+            using var scope = Services.CreateScope();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var user = await users.FindByEmailAsync(email) ?? throw new InvalidOperationException("ユーザーが見つかりません。");
+            return user.EmailConfirmed;
+        }
+
+        public async Task<string> GetSecurityStampAsync(string email)
+        {
+            using var scope = Services.CreateScope();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var user = await users.FindByEmailAsync(email) ?? throw new InvalidOperationException("ユーザーが見つかりません。");
+            return user.SecurityStamp!;
         }
 
         protected override void Dispose(bool disposing)

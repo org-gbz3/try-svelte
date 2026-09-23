@@ -3,6 +3,7 @@ import type {
 	auth as Auth,
 	apiFetch as ApiFetch,
 	csrfRequest as CsrfRequest,
+	passkeysSupported as PasskeysSupported,
 	DEFAULT_API_TIMEOUT_MS as DefaultTimeout,
 	DEFAULT_READ_RETRIES as DefaultReadRetries
 } from './auth.svelte';
@@ -30,6 +31,7 @@ function brokenJsonResponse(status: number): Response {
 let auth: typeof Auth;
 let apiFetch: typeof ApiFetch;
 let csrfRequest: typeof CsrfRequest;
+let passkeysSupported: typeof PasskeysSupported;
 let DEFAULT_API_TIMEOUT_MS: typeof DefaultTimeout;
 let DEFAULT_READ_RETRIES: typeof DefaultReadRetries;
 let fetchMock: ReturnType<typeof vi.fn<FetchHandler>>;
@@ -42,6 +44,7 @@ beforeEach(async () => {
 	auth = module.auth;
 	apiFetch = module.apiFetch;
 	csrfRequest = module.csrfRequest;
+	passkeysSupported = module.passkeysSupported;
 	DEFAULT_API_TIMEOUT_MS = module.DEFAULT_API_TIMEOUT_MS;
 	DEFAULT_READ_RETRIES = module.DEFAULT_READ_RETRIES;
 	fetchMock = vi.fn<FetchHandler>();
@@ -271,5 +274,163 @@ describe('auth.check', () => {
 		await Promise.all([auth.check(), auth.check()]);
 
 		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('passkeysSupported', () => {
+	it('window.PublicKeyCredential が定義されていれば true を返す', () => {
+		vi.stubGlobal('PublicKeyCredential', {});
+		expect(passkeysSupported()).toBe(true);
+	});
+
+	it('window.PublicKeyCredential が未定義なら false を返す', () => {
+		expect(passkeysSupported()).toBe(false);
+	});
+});
+
+// PublicKeyCredential.toJSON() の有無に依存せず自前でBase64URL直列化するため、
+// テストでは navigator.credentials.create/get が返す実物に近い形(ArrayBufferを含む)のダミーを用意する。
+function fakeAttestationCredential() {
+	return {
+		id: 'cred-1',
+		rawId: new Uint8Array([1, 2, 3]).buffer,
+		type: 'public-key',
+		authenticatorAttachment: 'platform',
+		getClientExtensionResults: () => ({}),
+		response: {
+			clientDataJSON: new Uint8Array([4, 5]).buffer,
+			attestationObject: new Uint8Array([6, 7]).buffer
+		}
+	};
+}
+
+function fakeAssertionCredential() {
+	return {
+		id: 'cred-1',
+		rawId: new Uint8Array([1, 2, 3]).buffer,
+		type: 'public-key',
+		authenticatorAttachment: 'platform',
+		getClientExtensionResults: () => ({}),
+		response: {
+			clientDataJSON: new Uint8Array([4, 5]).buffer,
+			authenticatorData: new Uint8Array([8]).buffer,
+			signature: new Uint8Array([9]).buffer,
+			userHandle: new Uint8Array([10]).buffer
+		}
+	};
+}
+
+describe('auth.registerPasskey', () => {
+	it('作成した認証情報をJSON文字列にしてサーバーへ登録する', async () => {
+		const parseCreationOptionsFromJSON = vi.fn((json: unknown) => json);
+		const credentialsCreate = vi.fn().mockResolvedValue(fakeAttestationCredential());
+		vi.stubGlobal('PublicKeyCredential', { parseCreationOptionsFromJSON });
+		vi.stubGlobal('navigator', { credentials: { create: credentialsCreate } });
+
+		fetchMock.mockResolvedValueOnce(CSRF_OK());
+		fetchMock.mockResolvedValueOnce(jsonResponse(200, { challenge: 'abc' }));
+		fetchMock.mockResolvedValueOnce(CSRF_OK());
+		fetchMock.mockResolvedValueOnce(jsonResponse(201, null));
+
+		await auth.registerPasskey('自分のPC');
+
+		expect(parseCreationOptionsFromJSON).toHaveBeenCalledWith({ challenge: 'abc' });
+		expect(credentialsCreate).toHaveBeenCalledWith({ publicKey: { challenge: 'abc' } });
+		const [path, init] = fetchMock.mock.calls.at(-1)!;
+		expect(path).toBe('/api/auth/passkeys');
+		const body = JSON.parse((init as RequestInit).body as string);
+		expect(body.name).toBe('自分のPC');
+		const credentialJson = JSON.parse(body.credentialJson);
+		expect(credentialJson.id).toBe('cred-1');
+		expect(credentialJson.clientExtensionResults).toEqual({});
+		expect(typeof credentialJson.rawId).toBe('string');
+		expect(typeof credentialJson.response.clientDataJSON).toBe('string');
+		expect(typeof credentialJson.response.attestationObject).toBe('string');
+	});
+
+	it('認証器の操作が失敗・キャンセルされた場合はわかりやすいメッセージを投げる', async () => {
+		vi.stubGlobal('PublicKeyCredential', { parseCreationOptionsFromJSON: (json: unknown) => json });
+		vi.stubGlobal('navigator', { credentials: { create: vi.fn().mockRejectedValue(new Error('NotAllowedError')) } });
+		fetchMock.mockResolvedValueOnce(CSRF_OK());
+		fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+
+		await expect(auth.registerPasskey()).rejects.toThrow('パスキーの作成がキャンセルされたか失敗しました。');
+	});
+
+	it('サーバーが登録を拒否した場合はサーバーのメッセージで例外を投げる', async () => {
+		vi.stubGlobal('PublicKeyCredential', { parseCreationOptionsFromJSON: (json: unknown) => json });
+		vi.stubGlobal('navigator', {
+			credentials: { create: vi.fn().mockResolvedValue(fakeAttestationCredential()) }
+		});
+		fetchMock.mockResolvedValueOnce(CSRF_OK());
+		fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+		fetchMock.mockResolvedValueOnce(CSRF_OK());
+		fetchMock.mockResolvedValueOnce(jsonResponse(400, { message: '登録できるパスキーは10件までです。' }));
+
+		await expect(auth.registerPasskey()).rejects.toThrow('登録できるパスキーは10件までです。');
+	});
+});
+
+describe('auth.loginWithPasskey', () => {
+	it('取得した認証情報でログインし、ユーザー情報を保持する', async () => {
+		const parseRequestOptionsFromJSON = vi.fn((json: unknown) => json);
+		const credentialsGet = vi.fn().mockResolvedValue(fakeAssertionCredential());
+		vi.stubGlobal('PublicKeyCredential', { parseRequestOptionsFromJSON });
+		vi.stubGlobal('navigator', { credentials: { get: credentialsGet } });
+
+		fetchMock.mockResolvedValueOnce(CSRF_OK());
+		fetchMock.mockResolvedValueOnce(jsonResponse(200, { challenge: 'xyz' }));
+		fetchMock.mockResolvedValueOnce(CSRF_OK());
+		fetchMock.mockResolvedValueOnce(jsonResponse(200, { id: '1', email: 'a@example.com' }));
+
+		await auth.loginWithPasskey('a@example.com');
+
+		expect(parseRequestOptionsFromJSON).toHaveBeenCalledWith({ challenge: 'xyz' });
+		expect(auth.user).toEqual({ id: '1', email: 'a@example.com' });
+		expect(auth.status).toBe('authenticated');
+
+		const [, init] = fetchMock.mock.calls.at(-1)!;
+		const body = JSON.parse((init as RequestInit).body as string);
+		const credentialJson = JSON.parse(body.credentialJson);
+		expect(credentialJson.response.signature).toBeTypeOf('string');
+		expect(credentialJson.response.userHandle).toBeTypeOf('string');
+	});
+
+	it('失敗すると一般的なメッセージで例外を投げる', async () => {
+		vi.stubGlobal('PublicKeyCredential', { parseRequestOptionsFromJSON: (json: unknown) => json });
+		vi.stubGlobal('navigator', {
+			credentials: { get: vi.fn().mockResolvedValue(fakeAssertionCredential()) }
+		});
+		fetchMock.mockResolvedValueOnce(CSRF_OK());
+		fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+		fetchMock.mockResolvedValueOnce(CSRF_OK());
+		fetchMock.mockResolvedValueOnce(jsonResponse(401, { message: 'ログインできません。' }));
+
+		await expect(auth.loginWithPasskey('a@example.com')).rejects.toThrow('ログインできません。');
+		expect(auth.user).toBeNull();
+	});
+});
+
+describe('auth.listPasskeys / auth.removePasskey', () => {
+	it('一覧はCSRF不要のGETで取得する', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(200, [{ id: 'a', name: '自分のPC', createdAt: null, isBackedUp: false }])
+		);
+
+		const result = await auth.listPasskeys();
+
+		expect(result).toEqual([{ id: 'a', name: '自分のPC', createdAt: null, isBackedUp: false }]);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it('削除はCSRFトークン付きのDELETEで、idをURLエンコードして呼び出す', async () => {
+		fetchMock.mockResolvedValueOnce(CSRF_OK());
+		fetchMock.mockResolvedValueOnce(jsonResponse(204, null));
+
+		await auth.removePasskey('a b/c');
+
+		const [path, init] = fetchMock.mock.calls.at(-1)!;
+		expect(path).toBe('/api/auth/passkeys/a%20b%2Fc');
+		expect((init as RequestInit).method).toBe('DELETE');
 	});
 });

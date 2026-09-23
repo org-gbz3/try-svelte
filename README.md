@@ -7,6 +7,7 @@ SvelteKit(SPA)をビルドして `backend/wwwroot` に配備し、ASP.NET Core(.
 - `backend/` — ASP.NET Core Web API（Controllers ベース、.NET 10）。`wwwroot` に配置された静的ファイルを配信し、API は `api/` 配下。
 - `frontend/` — SvelteKit（`@sveltejs/adapter-static` によるSPAビルド）。ビルド出力は直接 `backend/wwwroot` へ書き出される。
 - `decisions/` — 方針・仕様を検討した経緯（ADR）。現時点の仕様そのものはこの README や [ASP.NET_Core_Identity.md](ASP.NET_Core_Identity.md) 側に記載し、`decisions/` にはなぜその決定に至ったかを記録する。詳細は [decisions/README.md](decisions/README.md) を参照。
+- `docs/` — 機能別のER図と、画面操作とCRUD操作の対応表。現時点の仕様を示す資料で、対応するエンティティ・API・画面を変更するときに更新する。詳細は [docs/README.md](docs/README.md) を参照。
 
 エージェント向けの実装・テスト作成ルールは [AGENTS.md](AGENTS.md) を参照する。
 
@@ -97,6 +98,7 @@ ASP.NET Core はこの設定ファイルのコメントを読み飛ばす。
 | --- | --- |
 | `PublicBaseUrl` | 利用者が開く SPA の URL。Vite 開発時は `http://localhost:5173`、バックエンドから配信する場合はその URL。本番は HTTPS 必須 |
 | `ConfirmationTokenLifespanMinutes` | 確認トークンの発行からの有効期限（分）。1以上の整数、既定値は `1440`（24時間）。メール本文にも同じ値を表示 |
+| `PasswordResetTokenLifespanMinutes` | パスワード再設定トークンの発行からの有効期限（分）。1以上の整数、既定値は `30`。確認トークンとは別のトークンプロバイダーを使うため、期限も独立して設定する |
 | `Host` | 配信サービスの SMTP ホスト名 |
 | `Port` | STARTTLS 用ポート（通常 `587`）。暗黙 TLS の `465` は非対応 |
 | `EnableSsl` | STARTTLS を使用する場合 `true`。認証不要のローカル受信サーバーのみ `false` を使用 |
@@ -147,12 +149,45 @@ Development 環境では SMTP サーバーの応答・内部例外・スタッ�
 例えば `30` にすると発行から30分間有効になり、メール本文にも「発行から30分」と表示する。
 設定変更後はバックエンドを再起動する。0以下の値は起動時にエラーになる。
 変更後の期限は既存トークンの検証にも適用されるため、送信済みメールの説明とは異なる場合がある。
-この設定は Identity の標準 Data Protection トークンプロバイダーに適用する（現在、パスワード再設定は未実装）。
+この設定は Identity の標準 Data Protection トークンプロバイダーに適用する。
 リンクのフラグメントに格納し、確認画面のボタンから CSRF 対策付き POST で送る。
 メールスキャナーがリンクを開くだけでは確認済みにならない。
 Data Protection の鍵を保持しないと再起動後に既存リンクが無効になることがある。
 既存アカウントも `EmailConfirmed` が false ならログインできなくなるため、再送から確認を行う。
 既存の Identity テーブルを使用するので追加マイグレーションは不要。
+
+## パスワード再設定
+
+ログイン画面から「パスワードをお忘れですか?」で再設定依頼画面（`/forgot-password`）へ進み、登録済みメールアドレス宛に
+再設定リンクを送信する。未登録・確認済みなどのアカウント状態を判別できないよう、確認メールの再送と同じく常に同一の応答を返す。
+
+再設定トークンは確認メールとは別の名前付きトークンプロバイダーで発行し、有効期限は `Email:PasswordResetTokenLifespanMinutes`
+（既定 `30` 分）で指定する。リンクは確認メールと同様にフラグメントへ格納し（`/reset-password#userId=...&token=...`）、
+再設定画面のボタンから CSRF 対策付き POST で送る。
+
+再設定リンクを開けたことはメールアドレス所有の証明とみなし、再設定成功時に `EmailConfirmed` も `true` にする。
+また ASP.NET Core Identity は `ResetPasswordAsync` 実行時に `SecurityStamp` を自動更新するため、他デバイス・他セッションは
+既定の `SecurityStampValidator` 検証間隔（既定30分、未変更）以内に自動的に失効する。専用の全端末失効 API は実装していない。
+設計判断の詳細は [decisions/0006-password-reset-design.md](decisions/0006-password-reset-design.md) を参照する。
+
+## パスキー(WebAuthn)ログイン
+
+パスワードに並ぶ代替のログイン手段として、ASP.NET Core Identity 標準のパスキー(WebAuthn/FIDO2)対応を使う。MFA(第2要素)ではなく、単独で使える主認証手段として実装している。ログイン済みユーザーが `/settings/passkeys` から追加登録する方式のみ提供し、パスワードレスでの新規アカウント作成には対応しない(パスワードによる復旧経路を必ず残すため)。
+
+`IdentityPasskeyOptions` は `backend/Program.cs` で構成する。Relying Party ID(`ServerDomain`)は Host ヘッダーからの暗黙推定に頼らず、`Email:PublicBaseUrl` のホスト名から明示的に導出する(本番ドメイン確定後に変更すると既存のパスキーが無効になるため)。本人確認(`UserVerificationRequirement`)は `"required"` とし、生体認証・PINなどを必須にする。`ResidentKeyRequirement` は `"preferred"` とし、発見可能な資格情報の作成を強制はしないが妨げない。1ユーザーあたりの登録上限は10件(DB枯渇対策)。
+
+パスキーは `AspNetUserPasskeys` テーブル(Identity組み込み)で管理するため、`dotnet ef database update` でのマイグレーション適用がテーブル作成前提になる。マイグレーション未適用のまま登録画面を公開すると登録が完了できない状態になるため、配備順序に注意する。
+
+| API | 動作 |
+| --- | --- |
+| `POST /api/auth/passkeys/registration-options`(要ログイン) | パスキー登録用のオプションを取得 |
+| `POST /api/auth/passkeys`(要ログイン) | `{ credentialJson, name }` で登録。成功 `201`、失敗・上限超過 `400` |
+| `GET /api/auth/passkeys`(要ログイン) | 登録済みパスキーの一覧を取得 |
+| `DELETE /api/auth/passkeys/{credentialId}`(要ログイン) | パスキーを削除。存在しないIDでも冪等に `204` |
+| `POST /api/auth/passkeys/login-options` | `{ email }` でログイン用オプションを取得 |
+| `POST /api/auth/passkeys/login` | `{ credentialJson }` で認証。成功 `200` と `{ id, email, permissions }`、失敗 `401` |
+
+**既知のトレードオフ**: `login-options` はメールアドレス指定でオプションを要求する方式のため、応答の内容(許可される認証情報の有無)からアカウントの存在・パスキー登録有無が、ブラウザー側の挙動を通じて推測されうる。これはWebAuthnの仕様上の制約であり、`resend-confirmation`/`forgot-password` で徹底している「応答からアカウント状態を判別できないようにする」方針とは完全には一致しない。設計判断の詳細は [decisions/0007-passkey-authentication-design.md](decisions/0007-passkey-authentication-design.md) を参照する。
 
 ## ログイン機能
 
@@ -160,7 +195,7 @@ Data Protection の鍵を保持しないと再起動後に既存リンクが無�
 
 ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メールを送信し、ログイン画面へ移動する。メール内のリンクを開き、確認ボタンを押すまでログインできない。
 パスワードは12〜128文字で、大文字・小文字・数字・記号をそれぞれ含める。
-ログイン失敗5回で15分間ロックアウトする。パスワード再設定・MFA は未実装。
+ログイン失敗5回で15分間ロックアウトする。パスワード再設定は上記「パスワード再設定」、パスキーでのログインは上記「パスキー(WebAuthn)ログイン」を参照。MFA は未実装。
 
 | API | 動作 |
 | --- | --- |
@@ -168,6 +203,8 @@ ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メ�
 | `POST /api/auth/register` | `{ email, password }` で登録。成功 `201`、入力不備・登録不可 `400` |
 | `POST /api/auth/confirm-email` | `{ userId, token }` で確認。成功 `204`、無効・期限切れ `400` |
 | `POST /api/auth/resend-confirmation` | `{ email }` で再送。未登録・確認済みも同じ `200` 応答 |
+| `POST /api/auth/forgot-password` | `{ email }` でパスワード再設定を依頼。登録有無に関わらず同じ `200` 応答 |
+| `POST /api/auth/reset-password` | `{ userId, token, newPassword }` で再設定。成功 `204`、無効・期限切れ・ポリシー違反 `400` |
 | `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email, permissions }`、認証失敗 `401` |
 | `GET /api/auth/me` | 認証済みなら `200` と `{ id, email, permissions }`、未認証なら `401` |
 | `POST /api/auth/logout` | Cookie を削除し `204` |

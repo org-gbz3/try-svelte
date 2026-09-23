@@ -18,11 +18,13 @@ builder.Services.AddControllersWithViews(options =>
 // 開発時に API の仕様を確認できるよう OpenAPI の生成機能を登録する。
 builder.Services.AddOpenApi();
 
-// 不正な有効期限で稼働しないよう、確認メールの設定を起動時に検証する。
+// 不正な有効期限で稼働しないよう、確認メール・パスワード再設定の設定を起動時に検証する。
 builder.Services.AddOptions<EmailOptions>()
     .Bind(builder.Configuration.GetSection("Email"))
     .Validate(options => options.ConfirmationTokenLifespanMinutes > 0,
         "Email:ConfirmationTokenLifespanMinutes は1以上の整数を設定してください。")
+    .Validate(options => options.PasswordResetTokenLifespanMinutes > 0,
+        "Email:PasswordResetTokenLifespanMinutes は1以上の整数を設定してください。")
     .ValidateOnStart();
 
 // メール配送を認証処理から分離し、SMTP 実装を差し替え可能にする。
@@ -32,10 +34,17 @@ builder.Services.AddTransient<IConfirmationEmailSender, SmtpConfirmationEmailSen
 builder.Services.AddOptions<AdminBootstrapOptions>()
     .Bind(builder.Configuration.GetSection("Admin:Bootstrap"));
 
-// メール本文の案内と実際のトークン有効期限を同じ設定値に揃える。
+// メール本文の案内と実際のトークン有効期限を同じ設定値に揃える(メール確認用の既定プロバイダー)。
 builder.Services.AddOptions<DataProtectionTokenProviderOptions>()
     .Configure<IOptions<EmailOptions>>((options, emailOptions) =>
         options.TokenLifespan = TimeSpan.FromMinutes(emailOptions.Value.ConfirmationTokenLifespanMinutes));
+
+// パスワード再設定はメール確認より短い有効期限にするため、専用のオプション型・プロバイダーで構成を分離する
+// (DataProtectorTokenProvider は名前なしの IOptions<DataProtectionTokenProviderOptions> を直接参照するため、
+// 名前付きオプションを登録するだけでは確認メール用の設定と分離できない。PasswordResetTokenProvider.cs 参照)。
+builder.Services.AddOptions<PasswordResetTokenProviderOptions>()
+    .Configure<IOptions<EmailOptions>>((options, emailOptions) =>
+        options.TokenLifespan = TimeSpan.FromMinutes(emailOptions.Value.PasswordResetTokenLifespanMinutes));
 
 // 認証情報を SQL Server に永続化し、接続文字列の未設定を検出する。
 builder.Services.AddDbContext<AuthDbContext>(options =>
@@ -50,7 +59,26 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
     options.Password.RequiredLength = 12;
     options.Lockout.MaxFailedAccessAttempts = 5;
     options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
-}).AddEntityFrameworkStores<AuthDbContext>().AddDefaultTokenProviders();
+    // パスワード再設定トークンは専用プロバイダーを使い、メール確認とは別の有効期限にする。
+    options.Tokens.PasswordResetTokenProvider = "PasswordReset";
+    // パスキー(IUserPasskeyStore)のEFモデルを有効にするため、対応するスキーマバージョンを指定する。
+    options.Stores.SchemaVersion = IdentitySchemaVersions.Version3;
+}).AddEntityFrameworkStores<AuthDbContext>()
+    .AddDefaultTokenProviders()
+    .AddTokenProvider<PasswordResetTokenProvider>("PasswordReset");
+
+// パスキー(WebAuthn)の Relying Party ID は Host ヘッダーからの暗黙推定に頼らず、
+// 既にメールリンク生成で検証済みの Email:PublicBaseUrl から明示的に導出する
+// (ServerDomain を後から変更すると既存のパスキーが無効になるため、本番ドメイン確定前提で固定する)。
+builder.Services.AddOptions<IdentityPasskeyOptions>()
+    .Configure<IOptions<EmailOptions>>((options, emailOptions) =>
+    {
+        options.ServerDomain = new Uri(emailOptions.Value.PublicBaseUrl).Host;
+        // セキュリティを優先し、生体認証・PINなどの本人確認を必須にする。
+        options.UserVerificationRequirement = "required";
+        // 破棄可能な資格情報の枠を強制消費しないが、対応認証器では発見可能資格情報も許容する。
+        options.ResidentKeyRequirement = "preferred";
+    });
 
 // ロールが保持するAPIアクション別の権限を、リクエストごとにDBから判定する認可基盤を登録する。
 // Cookieには権限を一切載せないため、ロール・権限の変更が既存のログインセッションへ即時反映される(decisions/0001参照)。

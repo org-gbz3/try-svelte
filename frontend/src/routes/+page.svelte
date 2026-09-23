@@ -35,6 +35,7 @@
 			{#if auth.hasPermission('Admin.Users', PermissionLevel.Read)}
 				<a href="/admin/users">ユーザー管理</a>
 			{/if}
+			<a href="/settings/passkeys">パスキーの管理</a>
 			<button onclick={handleLogout} disabled={submitting}>ログアウト</button>
 			{#if error}<p role="alert">{error}</p>{/if}
 		</div>

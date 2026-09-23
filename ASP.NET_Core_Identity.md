@@ -26,16 +26,18 @@ Identity はユーザー、パスワード、ロール、確認トークンな�
 | 管理者承認を必要とするか | 承認待ち状態と承認操作が必要。メールが届くことと利用資格があることは別に判定する | 管理者承認は未実装 |
 | 電話番号確認を必要とするか | 電話番号の登録・変更・確認コード配送が必要 | 電話番号確認は未実装 |
 | MFA を任意・必須のどちらにするか | パスワード成功後に追加認証へ進む。端末紛失時の復旧手段も必要 | MFA は未実装 |
+| パスワード以外のログイン手段を許可するか | パスキー(WebAuthn)を主認証手段として並立させると、資格情報の管理画面・登録上限・端末紛失時の失効手段が必要 | パスキーログインを実装(`SignInManager.PasskeySignInAsync`)。MFAではなくパスワードと並ぶ代替の主認証手段として位置づける。設計判断は [decisions/0007-passkey-authentication-design.md](decisions/0007-passkey-authentication-design.md) を参照 |
 
 `RequireConfirmedAccount` を有効にするだけで独自の管理者承認フローが完成するわけではない。承認の意味と判定を設計する。また、ログイン結果は成功・失敗だけでなく、確認条件未達、ロック中、追加認証要求などを考慮する。[Microsoft Learn: Identity の設定](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/identity-configuration?view=aspnetcore-10.0)
 
-現在のログイン API は `PasswordSignInAsync` の成功以外を同じ `401` にまとめる。将来 MFA を追加するときは、追加認証が必要な結果を専用フローへ分岐させる実装も必要になる。
+現在のログイン API は `PasswordSignInAsync`/`PasskeySignInAsync` の成功以外を同じ `401` にまとめる。将来 MFA を追加するときは、追加認証が必要な結果を専用フローへ分岐させる実装も必要になる。
 
 ## 3. 確認メールとトークン
 
 | 最初に決めること | 選択によるアプリの挙動 | このアプリの現状 |
 | --- | --- | --- |
 | 有効期限 | 短くすると期限切れと再送が増える。長くすると古いリンクを利用できる期間が延びる | `Email:ConfirmationTokenLifespanMinutes`、既定値1440分 |
+| パスワード再設定の有効期限 | 確認メールと同じ考え方だが、悪用の影響が大きいため短めにする判断もある | `Email:PasswordResetTokenLifespanMinutes`、既定値30分。確認メールとは別の名前付きトークンプロバイダーで発行 |
 | 確認のタイミング | リンクを開くだけで確定すると、メールスキャナーによるアクセスでも確定する可能性がある | 確認画面のボタンから POST して確定 |
 | 配送に失敗した場合 | 登録を取り消すか、未確認ユーザーを残すかで再登録・再送の導線が変わる | 未確認ユーザーを残し、登録 API は `503`。再送で復旧 |
 | 再送時の応答 | 状態ごとに応答を変えると、第三者が登録状態を推測できる | 未登録・確認済み・配送失敗も同じ `200` 応答 |
@@ -44,7 +46,7 @@ Identity はユーザー、パスワード、ロール、確認トークンな�
 
 このアプリはトークンを URL のフラグメントに入れ、CSRF 対策付き POST で検証する。本文の期限説明にも同じ設定値を使用する。設定変更後は再起動が必要で、新しい期限は送信済みトークンの検証にも適用される。送信済み本文は書き換わらない。
 
-現在は標準の `DataProtectionTokenProviderOptions.TokenLifespan` を変更している。将来、パスワード再設定とメール確認の期限を別にする場合は、用途別のトークンプロバイダーを設定する。[Microsoft Learn: 確認・復旧用トークンの有効期限](https://learn.microsoft.com/en-us/aspnet/core/blazor/security/account-confirmation-and-password-recovery?view=aspnetcore-10.0)
+メール確認は標準(既定名)の `DataProtectionTokenProviderOptions.TokenLifespan` を変更し、パスワード再設定は `"PasswordReset"` という名前付きトークンプロバイダーを別途登録して、用途ごとに独立した期限を設定している(`backend/Program.cs`)。設計判断の経緯は [decisions/0006-password-reset-design.md](decisions/0006-password-reset-design.md) を参照する。[Microsoft Learn: 確認・復旧用トークンの有効期限](https://learn.microsoft.com/en-us/aspnet/core/blazor/security/account-confirmation-and-password-recovery?view=aspnetcore-10.0)
 
 ## 4. パスワードと不正なログイン試行
 
@@ -69,9 +71,9 @@ Identity はユーザー、パスワード、ロール、確認トークンな�
 | 操作中に期限を延長するか | 延長ありなら利用中のセッションが継続しやすい。延長なしなら利用中でも期限が来る | `SlidingExpiration = false` |
 | ブラウザーを閉じた後も保持するか | 永続 Cookie を使うと再起動後も期限内なら継続できる | `isPersistent: false`。ただしブラウザーのセッション復元に左右されるため、閉じれば必ずログアウトする保証にはしない |
 | ログアウトの範囲 | 現在のブラウザーだけか、全端末か、端末を選んで解除するかで実装が変わる | 現在のブラウザーのみ |
-| パスワード変更・利用停止をいつ反映するか | 即時反映を求めるなら、既存チケットの失効・再検証の仕組みが必要 | 独自の全端末失効 API は未実装 |
+| パスワード変更・利用停止をいつ反映するか | 即時反映を求めるなら、既存チケットの失効・再検証の仕組みが必要 | パスワード再設定は Identity の `ResetPasswordAsync` が `SecurityStamp` を自動更新するため、他デバイスも既定の `SecurityStampValidator` 検証間隔(既定30分、未変更)以内に失効する。ただし独自の即時・全端末失効 API は未実装 |
 
-メール確認トークンの期限と Cookie の期限は独立している。確認リンクを30分にしても、ログイン状態が30分になるわけではない。Cookie の期間と永続性は別の設定である。[Microsoft Learn: Identity の Cookie 設定](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/identity-configuration?view=aspnetcore-10.0)
+メール確認トークンの期限と Cookie の期限は独立している。確認リンクを30分にしても、ログイン状態が30分になるわけではない。Cookie の期間と永続性は別の設定である。パスワード再設定成功時のセッション失効も同様で、`SecurityStamp` の再検証間隔に依存し、即時ではない(設計判断は [decisions/0006-password-reset-design.md](decisions/0006-password-reset-design.md) を参照)。[Microsoft Learn: Identity の Cookie 設定](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/identity-configuration?view=aspnetcore-10.0)
 
 Cookie 認証では、`SameSite` の設定だけに依存せず更新 API に CSRF 対策を適用する。このアプリは直前に `/api/auth/csrf` で取得した値を `X-CSRF-TOKEN` に設定する。[Microsoft Learn: CSRF 対策](https://learn.microsoft.com/en-us/aspnet/core/security/anti-request-forgery?view=aspnetcore-10.0)
 
@@ -90,16 +92,17 @@ Cookie 認証では、`SameSite` の設定だけに依存せず更新 API に CS
 
 ## 7. 変更・復旧・退会と外部ログイン
 
-以下はこのアプリでは未実装。運用を始める前に、必要な範囲と利用者の復旧手段を決める。
+パスワードを忘れた場合の再設定は実装済み(下記)。それ以外は未実装。運用を始める前に、必要な範囲と利用者の復旧手段を決める。
 
-| 方針として決めること | 必要になる挙動・実装 |
-| --- | --- |
-| パスワードを忘れた場合 | 再設定依頼、期限付きトークン、入力画面、登録状態を公開しない応答、再設定後のセッションの扱い |
-| メールアドレス変更 | 新アドレスの確認、一意性検証、変更完了までの旧アドレスの扱い。このアプリではログイン名もメールなので `UserName` の更新方針も必要 |
-| MFA 端末を紛失した場合 | 回復コード等の代替手段、本人確認を伴うサポート手順 |
-| 利用停止と退会 | 新規ログインと既存セッションの拒否、データの削除・保持・匿名化、同じメールでの再登録可否 |
-| Google などの外部ログイン | 外部アカウントとの関連付け、同じメールの既存ユーザーとの統合条件、外部サービスが使えない場合の復旧 |
-| 管理者による操作 | 最初の管理者は `Admin:Bootstrap:Email`/`Admin:Bootstrap:Password` の設定により起動時に自動作成する(README.mdの「最初の管理者のブートストラップ」参照)。`Admin.Roles` への `Write` 権限を持つロールが既にあれば何もしない。権限を付与できる人は「ロール管理API(`Admin.Roles`/`Admin.UserRoles`)への `Write` 権限を持つこと」で定義済み(特別な管理者ロール名はない)。操作履歴(監査ログ)・誤操作からの復旧は未実装 |
+| 方針として決めること | 必要になる挙動・実装 | このアプリの現状 |
+| --- | --- | --- |
+| パスワードを忘れた場合 | 再設定依頼、期限付きトークン、入力画面、登録状態を公開しない応答、再設定後のセッションの扱い | 実装済み。`/forgot-password` で依頼、`/reset-password` で再設定。確認メールと同じフラグメント配布・CSRF付きPOST・非開示応答の方針。詳細は [README.md の「パスワード再設定」](README.md#パスワード再設定)、経緯は [decisions/0006-password-reset-design.md](decisions/0006-password-reset-design.md) を参照 |
+| パスキー(WebAuthn)を主認証手段に追加する場合 | 資格情報の登録・一覧・削除画面、Relying Party ID の確定、本人確認レベルの選定 | 実装済み。ログイン済みユーザーのみ `/settings/passkeys` から追加登録でき、`/login` からパスキーでログインできる。MFA(下記「MFA 端末を紛失した場合」)や外部ログイン(下記)とは異なり、パスワードと並ぶ単独の主認証手段として実装している。詳細は [README.md の「パスキー(WebAuthn)ログイン」](README.md#パスキーwebauthnログイン)、経緯は [decisions/0007-passkey-authentication-design.md](decisions/0007-passkey-authentication-design.md) を参照 |
+| メールアドレス変更 | 新アドレスの確認、一意性検証、変更完了までの旧アドレスの扱い。このアプリではログイン名もメールなので `UserName` の更新方針も必要 | 未実装 |
+| MFA 端末を紛失した場合 | 回復コード等の代替手段、本人確認を伴うサポート手順 | 未実装 |
+| 利用停止と退会 | 新規ログインと既存セッションの拒否、データの削除・保持・匿名化、同じメールでの再登録可否 | 未実装 |
+| Google などの外部ログイン | 外部アカウントとの関連付け、同じメールの既存ユーザーとの統合条件、外部サービスが使えない場合の復旧 | 未実装 |
+| 管理者による操作 | 最初の管理者は `Admin:Bootstrap:Email`/`Admin:Bootstrap:Password` の設定により起動時に自動作成する(README.mdの「最初の管理者のブートストラップ」参照)。`Admin.Roles` への `Write` 権限を持つロールが既にあれば何もしない。権限を付与できる人は「ロール管理API(`Admin.Roles`/`Admin.UserRoles`)への `Write` 権限を持つこと」で定義済み(特別な管理者ロール名はない)。操作履歴(監査ログ)・誤操作からの復旧は未実装 | 部分実装(ブートストラップのみ) |
 
 外部ログインなどは Identity が扱える機能だが、独自 API を使うこのアプリには、それぞれの操作経路と画面を追加する必要がある。[Microsoft Learn: Identity が扱う機能](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/identity?view=aspnetcore-10.0)
 

@@ -472,6 +472,7 @@ public class AuthorizationTests
             Messages.Add((email, userId, token));
             return Task.CompletedTask;
         }
+        public Task SendPasswordResetAsync(string email, string userId, string token) => Task.CompletedTask;
     }
 
     private sealed class AuthorizationFactory : WebApplicationFactory<Program>

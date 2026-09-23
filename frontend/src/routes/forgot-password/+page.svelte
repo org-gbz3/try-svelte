@@ -1,57 +1,23 @@
 <script lang="ts">
-	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
-	import { auth, passkeysSupported } from '$lib/auth.svelte';
+	import { auth } from '$lib/auth.svelte';
 
 	let email = $state('');
-	let password = $state('');
 	let error = $state('');
-	let submitting = $state(false);
 	let notice = $state('');
-
-	async function resend() {
-		if (submitting) return;
-		if (!email) { error = 'メールアドレスを入力してください'; return; }
-		submitting = true;
-		error = '';
-		notice = '';
-		try { notice = await auth.resendConfirmation(email); }
-		catch (cause) { error = cause instanceof Error ? cause.message : '再送に失敗しました。'; }
-		finally { submitting = false; }
-	}
-
-	async function loginWithPasskey() {
-		if (submitting) return;
-		if (!email) { error = 'メールアドレスを入力してください'; return; }
-		error = '';
-		submitting = true;
-		try {
-			await auth.loginWithPasskey(email);
-			await goto('/');
-		} catch (cause) {
-			error = cause instanceof TypeError ? '通信に失敗しました。接続を確認してください。'
-				: cause instanceof Error ? cause.message : '処理に失敗しました。';
-		} finally {
-			submitting = false;
-		}
-	}
-
-	$effect(() => {
-		if (auth.isLoggedIn) goto('/');
-	});
+	let submitting = $state(false);
 
 	async function handleSubmit(event: SubmitEvent) {
 		event.preventDefault();
 		if (submitting) return;
-		if (!email || !password) {
-			error = 'メールアドレスとパスワードを入力してください';
+		if (!email) {
+			error = 'メールアドレスを入力してください';
 			return;
 		}
 		error = '';
+		notice = '';
 		submitting = true;
 		try {
-			await auth.login(email, password);
-			await goto("/");
+			notice = await auth.requestPasswordReset(email);
 		} catch (cause) {
 			error = cause instanceof TypeError ? '通信に失敗しました。接続を確認してください。'
 				: cause instanceof Error ? cause.message : '処理に失敗しました。';
@@ -63,32 +29,20 @@
 
 <main>
 	<div class="card">
-		<h1>ログイン</h1>
-		{#if page.url.searchParams.get("registered") === "1"}
-			<p role="status">確認メールを送信しました。メール内のリンクで確認を完了してからログインしてください。</p>
-		{/if}
-		<p>メールアドレスの確認が完了するとログインできます。</p>
+		<h1>パスワードの再設定</h1>
+		<p>登録済みのメールアドレスを入力すると、再設定用のリンクを送信します。</p>
 		{#if notice}<p role="status">{notice}</p>{/if}
 		<form onsubmit={handleSubmit}>
 			<label>
 				メールアドレス
 				<input type="email" autocomplete="email" bind:value={email} maxlength="254" required />
 			</label>
-			<label>
-				パスワード
-				<input type="password" autocomplete="current-password" bind:value={password} maxlength="128" required />
-			</label>
 			{#if error}
 				<p class="error" role="alert">{error}</p>
 			{/if}
-			<button type="submit" disabled={submitting}>ログイン</button>
-			{#if passkeysSupported()}
-				<button type="button" onclick={loginWithPasskey} disabled={submitting}>パスキーでログイン</button>
-			{/if}
-			<button type="button" onclick={resend} disabled={submitting}>確認メールを再送</button>
+			<button type="submit" disabled={submitting}>再設定メールを送信</button>
 		</form>
-		<p class="switch">アカウントをお持ちでない方は <a href="/signup">アカウント作成</a></p>
-		<p class="switch"><a href="/forgot-password">パスワードをお忘れですか?</a></p>
+		<p class="switch"><a href="/login">ログインに戻る</a></p>
 	</div>
 </main>
 

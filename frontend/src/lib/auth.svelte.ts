@@ -91,6 +91,52 @@ async function post(path: string, body?: unknown): Promise<Response> {
 	return csrfRequest(path, 'POST', body);
 }
 
+// このプロジェクトは対応ブラウザーを限定していないため、非対応環境ではパスキー関連のUIを出さない。
+export function passkeysSupported(): boolean {
+	return typeof window !== 'undefined' && !!window.PublicKeyCredential;
+}
+
+function toBase64Url(value: ArrayBuffer | null | undefined): string | undefined {
+	if (!value) return undefined;
+	const bytes = new Uint8Array(value);
+	let binary = '';
+	for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+	return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// PublicKeyCredential.toJSON() はブラウザー・一部のパスワードマネージャーによって未実装・不完全な場合があり、
+// その場合 JSON.stringify(credential) だけでは clientExtensionResults 等が欠落する。
+// サーバーが要求するフィールドを手動でBase64URLへ変換して組み立てる。
+function serializeCredential(credential: PublicKeyCredential): string {
+	// AuthenticatorAttestationResponse/AuthenticatorAssertionResponse は実行環境によってグローバルに
+	// 存在しない場合があるため、instanceof ではなくプロパティの有無(WebAuthn仕様上保証される形)で判定する。
+	const response = credential.response as AuthenticatorAttestationResponse | AuthenticatorAssertionResponse;
+	const responseJson: Record<string, unknown> = {
+		clientDataJSON: toBase64Url(response.clientDataJSON)
+	};
+	if ('attestationObject' in response) {
+		responseJson.attestationObject = toBase64Url(response.attestationObject);
+		responseJson.authenticatorData = toBase64Url(response.getAuthenticatorData?.());
+		responseJson.publicKey = toBase64Url(response.getPublicKey?.() ?? undefined);
+		responseJson.publicKeyAlgorithm = response.getPublicKeyAlgorithm?.();
+		responseJson.transports = response.getTransports?.();
+	} else {
+		responseJson.authenticatorData = toBase64Url(response.authenticatorData);
+		responseJson.signature = toBase64Url(response.signature);
+		responseJson.userHandle = toBase64Url(response.userHandle);
+	}
+	return JSON.stringify({
+		id: credential.id,
+		rawId: toBase64Url(credential.rawId),
+		type: credential.type,
+		authenticatorAttachment: credential.authenticatorAttachment ?? undefined,
+		clientExtensionResults: credential.getClientExtensionResults(),
+		response: responseJson
+	});
+}
+
+export type PasskeyInfo = { id: string; name: string; createdAt: string | null; isBackedUp: boolean };
+
 export const auth = {
 	get user() { return user; },
 	get status() { return status; },
@@ -134,6 +180,61 @@ export const auth = {
 		const response = await post('/api/auth/resend-confirmation', { email });
 		if (!response.ok) throw await responseError(response, '再送を受け付けられませんでした。');
 		return (await response.json()).message as string;
+	},
+	async requestPasswordReset(email: string) {
+		const response = await post('/api/auth/forgot-password', { email });
+		if (!response.ok) throw await responseError(response, '再設定メールの送信を受け付けられませんでした。');
+		return (await response.json()).message as string;
+	},
+	async resetPassword(userId: string, token: string, newPassword: string) {
+		const response = await post('/api/auth/reset-password', { userId, token, newPassword });
+		if (!response.ok) throw await responseError(response, 'パスワードを再設定できませんでした。');
+	},
+	async registerPasskey(name?: string) {
+		const optionsResponse = await post('/api/auth/passkeys/registration-options');
+		if (!optionsResponse.ok) throw await responseError(optionsResponse, 'パスキーの登録を準備できませんでした。');
+		const optionsJson = await optionsResponse.json();
+		const options = PublicKeyCredential.parseCreationOptionsFromJSON(optionsJson);
+		let credential: Credential | null;
+		try {
+			credential = await navigator.credentials.create({ publicKey: options });
+		} catch {
+			throw new Error('パスキーの作成がキャンセルされたか失敗しました。');
+		}
+		if (!credential) throw new Error('パスキーを作成できませんでした。');
+		const response = await post('/api/auth/passkeys', {
+			credentialJson: serializeCredential(credential as PublicKeyCredential),
+			name
+		});
+		if (!response.ok) throw await responseError(response, 'パスキーを登録できませんでした。');
+	},
+	async listPasskeys(): Promise<PasskeyInfo[]> {
+		const response = await apiFetch('/api/auth/passkeys');
+		if (!response.ok) throw await responseError(response, 'パスキーの一覧を取得できませんでした。');
+		return await response.json();
+	},
+	async removePasskey(id: string) {
+		const response = await csrfRequest(`/api/auth/passkeys/${encodeURIComponent(id)}`, 'DELETE');
+		if (!response.ok) throw await responseError(response, 'パスキーを削除できませんでした。');
+	},
+	async loginWithPasskey(email: string) {
+		const optionsResponse = await post('/api/auth/passkeys/login-options', { email });
+		if (!optionsResponse.ok) throw await responseError(optionsResponse, 'パスキーログインを準備できませんでした。');
+		const optionsJson = await optionsResponse.json();
+		const options = PublicKeyCredential.parseRequestOptionsFromJSON(optionsJson);
+		let credential: Credential | null;
+		try {
+			credential = await navigator.credentials.get({ publicKey: options });
+		} catch {
+			throw new Error('パスキーでの認証がキャンセルされたか失敗しました。');
+		}
+		if (!credential) throw new Error('パスキーで認証できませんでした。');
+		const response = await post('/api/auth/passkeys/login', {
+			credentialJson: serializeCredential(credential as PublicKeyCredential)
+		});
+		if (!response.ok) throw await responseError(response, 'ログインできませんでした。');
+		user = await response.json();
+		status = 'authenticated';
 	},
 	async logout() {
 		// サーバー側で Cookie は既に削除されているため、通信自体が失敗しても

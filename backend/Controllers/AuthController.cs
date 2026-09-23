@@ -83,12 +83,69 @@ public class AuthController(UserManager<ApplicationUser> users,
         return Ok(new { message = "未確認のアカウントがある場合、確認メールを送信します。届かない場合は時間をおいて再試行してください。" });
     }
 
-    private async Task<bool> SendConfirmation(ApplicationUser user)
+    [EnableRateLimiting("auth")]
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword(EmailRequest request)
     {
-        try
+        var user = await users.FindByEmailAsync(request.Email.Trim());
+        if (user is not null)
+            await SendPasswordReset(user);
+        // 登録の有無・確認状態を応答で公開しない(resend-confirmationと同じ方針)。
+        return Ok(new { message = "登録されたメールアドレスの場合、パスワード再設定用のメールを送信します。届かない場合は時間をおいて再試行してください。" });
+    }
+
+    [EnableRateLimiting("auth")]
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword(ResetPasswordRequest request)
+    {
+        var user = await users.FindByIdAsync(request.UserId);
+        if (user is null)
+            return BadRequest(new { message = "再設定リンクが無効か期限切れです。もう一度お試しください。" });
+
+        // ResetPasswordAsync と、未確認アカウントを確認済みにする更新の2回SaveChangesが走るため、
+        // 途中で失敗しても中途半端な状態にならないよう明示的トランザクションで囲む(decisions/0002参照)。
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var result = await users.ResetPasswordAsync(user, request.Token, request.NewPassword);
+        if (!result.Succeeded)
+        {
+            var passwordError = result.Errors.Any(error => error.Code.StartsWith("Password"));
+            return BadRequest(new { message = passwordError
+                ? "パスワードは12文字以上で、大文字・小文字・数字・記号を含めてください。"
+                : "再設定リンクが無効か期限切れです。もう一度お試しください。" });
+        }
+        // 再設定メールのリンクを開けたことは、メール確認と同水準の所有証明とみなす。
+        if (!user.EmailConfirmed)
+        {
+            user.EmailConfirmed = true;
+            await users.UpdateAsync(user);
+        }
+        await transaction.CommitAsync();
+
+        // パスワード再設定によりSecurityStampが更新され、他セッションも既定の検証間隔で失効するが、
+        // このブラウザーのセッションは念のため即座に終了する。
+        await signIn.SignOutAsync();
+        return NoContent();
+    }
+
+    private Task<bool> SendConfirmation(ApplicationUser user) => SendEmailAsync(
+        "確認メール", async () =>
         {
             var token = await users.GenerateEmailConfirmationTokenAsync(user);
             await emailSender.SendAsync(user.Email!, user.Id, token);
+        });
+
+    private Task<bool> SendPasswordReset(ApplicationUser user) => SendEmailAsync(
+        "パスワード再設定メール", async () =>
+        {
+            var token = await users.GeneratePasswordResetTokenAsync(user);
+            await emailSender.SendPasswordResetAsync(user.Email!, user.Id, token);
+        });
+
+    private async Task<bool> SendEmailAsync(string emailKind, Func<Task> send)
+    {
+        try
+        {
+            await send();
             return true;
         }
         catch (Exception exception)
@@ -98,15 +155,15 @@ public class AuthController(UserManager<ApplicationUser> users,
             {
                 // SMTP 応答と内部例外が原因特定に必要なため、開発環境だけで詳細を記録する。
                 logger.LogError(exception,
-                    "確認メールの送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
-                    exception.GetType().Name, smtpStatus);
+                    "{EmailKind}の送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
+                    emailKind, exception.GetType().Name, smtpStatus);
             }
             else
             {
                 // SMTP 応答に宛先などが含まれる可能性があるため、本番では例外本文を記録しない。
                 logger.LogError(
-                    "確認メールの送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
-                    exception.GetType().Name, smtpStatus);
+                    "{EmailKind}の送信に失敗しました。種類: {ExceptionType}, SMTP ステータス: {SmtpStatus}",
+                    emailKind, exception.GetType().Name, smtpStatus);
             }
             return false;
         }
@@ -123,6 +180,139 @@ public class AuthController(UserManager<ApplicationUser> users,
         if (!result.Succeeded)
             return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
         return Ok(new { id = user!.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
+    }
+
+    private const int MaxPasskeysPerUser = 10;
+
+    [EnableRateLimiting("auth")]
+    [Authorize]
+    [HttpPost("passkeys/registration-options")]
+    public async Task<IActionResult> PasskeyRegistrationOptions()
+    {
+        var user = await users.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+        var optionsJson = await signIn.MakePasskeyCreationOptionsAsync(new PasskeyUserEntity
+        {
+            Id = user.Id,
+            Name = user.Email!,
+            DisplayName = user.Email!
+        });
+        return Content(optionsJson, "application/json");
+    }
+
+    [EnableRateLimiting("auth")]
+    [Authorize]
+    [HttpPost("passkeys")]
+    public async Task<IActionResult> RegisterPasskey(PasskeyRegistrationRequest request)
+    {
+        var user = await users.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+
+        // 事前に registration-options を呼ばずに(または期限切れの状態で)呼び出すと
+        // Identity は失敗結果ではなく例外を投げるため、他の失敗と同じ応答に揃える。
+        PasskeyAttestationResult attestation;
+        try
+        {
+            attestation = await signIn.PerformPasskeyAttestationAsync(request.CredentialJson);
+        }
+        catch (InvalidOperationException exception)
+        {
+            logger.LogWarning(exception, "パスキー登録の呼び出し順序が不正です。");
+            return BadRequest(new { message = "パスキーの登録に失敗しました。もう一度お試しください。" });
+        }
+        if (!attestation.Succeeded)
+        {
+            // 原因(RPID・Origin不一致、署名検証失敗など)はユーザーには詳細を返さず、調査用にログへ残す。
+            logger.LogWarning("パスキーの登録に失敗しました。理由: {Reason}", attestation.Failure?.Message);
+            return BadRequest(new { message = "パスキーの登録に失敗しました。もう一度お試しください。" });
+        }
+
+        // DB枯渇攻撃を防ぐため、1ユーザーあたりの登録数に上限を設ける。
+        var existing = await users.GetPasskeysAsync(user);
+        if (existing.Count >= MaxPasskeysPerUser)
+            return BadRequest(new { message = $"登録できるパスキーは{MaxPasskeysPerUser}件までです。不要なパスキーを削除してから再試行してください。" });
+
+        var passkey = attestation.Passkey;
+        passkey.Name = string.IsNullOrWhiteSpace(request.Name) ? "パスキー" : request.Name.Trim();
+        var result = await users.AddOrUpdatePasskeyAsync(user, passkey);
+        if (!result.Succeeded)
+            return BadRequest(new { message = "パスキーを保存できませんでした。" });
+        return StatusCode(StatusCodes.Status201Created);
+    }
+
+    [Authorize]
+    [HttpGet("passkeys")]
+    public async Task<IActionResult> ListPasskeys()
+    {
+        var user = await users.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+        var passkeys = await users.GetPasskeysAsync(user);
+        return Ok(passkeys.Select(passkey => new
+        {
+            id = ToBase64Url(passkey.CredentialId),
+            name = passkey.Name,
+            createdAt = passkey.CreatedAt,
+            isBackedUp = passkey.IsBackedUp
+        }));
+    }
+
+    [EnableRateLimiting("auth")]
+    [Authorize]
+    [HttpDelete("passkeys/{credentialId}")]
+    public async Task<IActionResult> RemovePasskey(string credentialId)
+    {
+        var user = await users.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+        var result = await users.RemovePasskeyAsync(user, FromBase64Url(credentialId));
+        if (!result.Succeeded)
+            return BadRequest(new { message = "パスキーを削除できませんでした。" });
+        return NoContent();
+    }
+
+    // パスワードを問わずログイン可能なため、未登録・未対応も既存のパスワードログインと同じ一般的な401にまとめる。
+    [EnableRateLimiting("auth")]
+    [HttpPost("passkeys/login-options")]
+    public async Task<IActionResult> PasskeyLoginOptions(EmailRequest request)
+    {
+        var user = await users.FindByNameAsync(request.Email.Trim());
+        var optionsJson = await signIn.MakePasskeyRequestOptionsAsync(user);
+        return Content(optionsJson, "application/json");
+    }
+
+    [EnableRateLimiting("auth")]
+    [HttpPost("passkeys/login")]
+    public async Task<IActionResult> PasskeyLogin(PasskeyLoginRequest request)
+    {
+        // 事前に login-options を呼ばずに(または期限切れの状態で)呼び出すと
+        // Identity は失敗結果ではなく例外を投げるため、他の失敗と同じ応答に揃える。
+        Microsoft.AspNetCore.Identity.SignInResult result;
+        try
+        {
+            result = await signIn.PasskeySignInAsync(request.CredentialJson);
+        }
+        catch (InvalidOperationException exception)
+        {
+            logger.LogWarning(exception, "パスキーログインの呼び出し順序が不正です。");
+            return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
+        }
+        if (!result.Succeeded)
+        {
+            logger.LogWarning("パスキーログインに失敗しました。結果: {Result}", result);
+            return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
+        }
+        var user = await users.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+        return Ok(new { id = user.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
+    }
+
+    private static string ToBase64Url(byte[] bytes) =>
+        Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    private static byte[] FromBase64Url(string value)
+    {
+        var base64 = value.Replace('-', '+').Replace('_', '/');
+        base64 = base64.PadRight(base64.Length + (4 - base64.Length % 4) % 4, '=');
+        return Convert.FromBase64String(base64);
     }
 
     [Authorize]
@@ -161,6 +351,17 @@ public class AuthController(UserManager<ApplicationUser> users,
         [Required, StringLength(4096)] string Token);
 
     public sealed record EmailRequest([Required, EmailAddress, StringLength(254)] string Email);
+
+    public sealed record ResetPasswordRequest(
+        [Required, StringLength(128)] string UserId,
+        [Required, StringLength(4096)] string Token,
+        [Required, StringLength(128)] string NewPassword);
+
+    public sealed record PasskeyRegistrationRequest(
+        [Required] string CredentialJson,
+        [StringLength(64)] string? Name);
+
+    public sealed record PasskeyLoginRequest([Required] string CredentialJson);
 
     public sealed record Credentials(
         [Required, EmailAddress, StringLength(254)] string Email,
