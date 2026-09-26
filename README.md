@@ -327,13 +327,25 @@ TLS をリバースプロキシで終端する場合は、信頼するプロキ�
 - `ITenantOwned` を実装したエンティティには、URLのテナント以外の行を返さないクエリフィルター(`AuthDbContext.TenantFilter`)を適用する。
   テナント文脈がないクエリは0件になる。保存時は `TenantId` を対象テナントで補完し、別テナントの `TenantId` の保存・`TenantId` の変更は例外にする。
 
+テナントは運営者(`Admin.Tenants` 権限)が `/admin/tenants` で作成し、登録済みユーザーをメールアドレスで直接所属させる(招待なし)。
+テナント作成時に既定ロール「テナント管理者」を作成し、その時点の全テナント用権限キーへの `Write` を付与する。
+運営者はメンバーごとにテナントロールを割り当てられる。トップ画面には `Admin.Tenants` の `Read` 権限を持つ場合のみリンクを表示する。
+
 | API | 動作 |
 | --- | --- |
+| `GET /api/admin/tenants` | テナント一覧(所属人数付き)を取得(`Admin.Tenants` の `Read`) |
+| `POST /api/admin/tenants` | `{ name }` でテナントと既定ロールを作成し `201` と `{ id }`(`Admin.Tenants` の `Write`) |
+| `GET /api/admin/tenants/{tenantId}` | テナント・テナントロール・メンバー(割り当てロール付き)を取得(`Admin.Tenants` の `Read`) |
+| `PUT /api/admin/tenants/{tenantId}` | テナント名を変更(`Admin.Tenants` の `Write`) |
+| `DELETE /api/admin/tenants/{tenantId}` | テナントを所属・テナントロールごと削除(`Admin.Tenants` の `Write`) |
+| `POST /api/admin/tenants/{tenantId}/members` | `{ email }` で既存ユーザーを所属させる。未登録・所属済みは `400`(`Admin.Tenants` の `Write`) |
+| `DELETE /api/admin/tenants/{tenantId}/members/{userId}` | 所属を解除(`Admin.Tenants` の `Write`) |
+| `PUT /api/admin/tenants/{tenantId}/members/{userId}/roles` | `{ roleIds: [...] }` でメンバーのテナントロールを置き換え。他テナントのロールは `400`(`Admin.Tenants` の `Write`) |
 | `GET /api/tenants/{tenantId}/me` | 所属していれば `200` と `{ id, name, permissions }`(そのテナントでの実効権限)、非所属は `403` |
 
-現在はデータモデルと認可基盤のみ実装している。運営者によるテナントの作成・所属の割り当て、テナントロールの編集、
-フロントエンドのテナント画面は未実装。テーブル追加のため、既存の環境ではマイグレーション `AddMultiTenancy` を
-`dotnet ef database update --project backend` で適用する。
+テナント内でのテナントロールの編集と、フロントエンドのテナント画面(`/t/{tenantId}`)は未実装。
+最初の管理者のブートストラップは `Admin.Tenants` を付与しないため、必要に応じて `/admin/roles` で管理者ロールに付与する。
+テーブル追加のため、既存の環境ではマイグレーション `AddMultiTenancy` を `dotnet ef database update --project backend` で適用する。
 
 ## 確認
 

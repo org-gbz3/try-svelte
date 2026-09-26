@@ -35,6 +35,9 @@
 			{#if auth.hasPermission('Admin.Users', PermissionLevel.Read)}
 				<a href="/admin/users">ユーザー管理</a>
 			{/if}
+			{#if auth.hasPermission('Admin.Tenants', PermissionLevel.Read)}
+				<a href="/admin/tenants">テナント管理</a>
+			{/if}
 			<a href="/settings/passkeys">パスキーの管理</a>
 			<a href="/settings/mfa">二段階認証(MFA)の管理</a>
 			<button onclick={handleLogout} disabled={submitting}>ログアウト</button>
