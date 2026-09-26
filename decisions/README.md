@@ -54,3 +54,4 @@
 | [0007](0007-passkey-authentication-design.md) | パスキー(WebAuthn)認証の設計 | 採用 |
 | [0008](0008-totp-mfa-design.md) | パスワード認証へのTOTP方式MFA追加 | 採用 |
 | [0009](0009-codeql-build-mode-none.md) | CodeQL の build-mode を none に統一する | 採用 |
+| [0010](0010-multi-tenancy-design.md) | マルチテナント対応の構成 | 採用 |

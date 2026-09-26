@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using backend.Authorization;
 using backend.Data;
 using backend.Services;
+using backend.Tenancy;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -89,6 +90,10 @@ builder.Services.AddAuthorization();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionAuthorizationPolicyProvider>();
 builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
+// テナントはURLパスの {tenantId} で特定し、同じリクエスト内の認可判定とクエリフィルターで共有する(decisions/0010参照)。
+builder.Services.AddScoped<TenantContext>();
+builder.Services.AddScoped<IAuthorizationHandler, TenantPermissionAuthorizationHandler>();
+
 // 認証 Cookie の保護と有効期間を定め、SPA が扱える HTTP ステータスを返す。
 builder.Services.ConfigureApplicationCookie(options =>
 {
@@ -172,6 +177,9 @@ app.UseRateLimiter();
 
 // 認可判定に先立ち、認証 Cookie から利用者を特定する。
 app.UseAuthentication();
+
+// 認可判定より前に、ルートの {tenantId} から対象テナントを確定する。
+app.UseMiddleware<TenantResolutionMiddleware>();
 
 // エンドポイントの認可要件に従い、利用者のアクセスを判定する。
 app.UseAuthorization();

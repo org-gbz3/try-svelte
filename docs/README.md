@@ -14,5 +14,6 @@ DBで管理するデータ(エンティティ)のテーブル間関係と、画�
 | [features/admin-roles.md](features/admin-roles.md) | ロール管理(`Admin.Roles`) | `RolesController` |
 | [features/admin-user-roles.md](features/admin-user-roles.md) | ユーザーへのロール割り当て(`Admin.UserRoles`) | `UserRolesController` |
 | [features/admin-users.md](features/admin-users.md) | ユーザー一覧(`Admin.Users`) | `UsersController` |
+| [features/tenants.md](features/tenants.md) | テナント所属・テナントロール(`Tenant.*`) | `TenantController` |
 
 `WeatherForecastController` はDB操作を伴わないデモ用エンドポイントのため対象外。

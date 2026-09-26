@@ -20,6 +20,7 @@ erDiagram
         string ActionKey UK
         string DisplayName
         datetimeoffset DiscoveredAt "起動時にコードから自動同期"
+        int Scope "0:System 1:Tenant"
     }
     RolePermissions {
         string RoleId PK "複合主キー、AspNetRoles.Id への FK"
@@ -27,6 +28,8 @@ erDiagram
         int Level "0:None 1:Read 2:Write"
     }
 ```
+
+`PermissionActions.Scope` が `Tenant` の権限キーはテナントロール用([tenants.md](tenants.md))のため、権限アクション一覧に含めず、`RolePermissions` にも設定できない(`400`)。
 
 `RolePermissions` はロール削除・権限アクション廃止に追随して `ON DELETE CASCADE` で削除される(`AuthDbContext.OnModelCreating`)。
 

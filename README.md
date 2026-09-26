@@ -312,6 +312,29 @@ SPA は起動・再読み込み時に `/api/auth/me` を呼ぶ。確認中は待
 ASP.NET Core Data Protection の鍵は再起動後も保持し、複数インスタンスの場合は共有する。
 TLS をリバースプロキシで終端する場合は、信頼するプロキシを限定して転送ヘッダーを設定する。
 
+## マルチテナント
+
+アカウントは全体で共通(メール一意)とし、1アカウントが複数のテナントに所属できる。データは共有DBに `TenantId` 列で分離する。
+ロールは2層で、既存の `Admin.*` などのシステムロールは運営者用、テナント内の業務権限はテナントごとに定義するテナントロールで判定する。
+設計判断は [decisions/0010-multi-tenancy-design.md](decisions/0010-multi-tenancy-design.md)、テーブル構成は
+[docs/features/tenants.md](docs/features/tenants.md) を参照する。
+
+- 対象テナントはURLパスの `/api/tenants/{tenantId}` で特定し、Cookie・セッションには保持しない。
+- テナント内の API は `[RequireTenantPermission]`(テナントロールの権限)または `[RequireTenantMember]`(所属のみ)で保護する。
+  所属・テナントロールはリクエストごとにDBで判定するため、変更は既存のログインセッションに即時反映される。
+  未認証は `401`、非所属・権限不足は `403`。
+- 権限キーは `[PermissionKey]` の `PermissionScope`(`System`/`Tenant`)で区別する。システムロールにはテナント用の権限キーを設定できない。
+- `ITenantOwned` を実装したエンティティには、URLのテナント以外の行を返さないクエリフィルター(`AuthDbContext.TenantFilter`)を適用する。
+  テナント文脈がないクエリは0件になる。保存時は `TenantId` を対象テナントで補完し、別テナントの `TenantId` の保存・`TenantId` の変更は例外にする。
+
+| API | 動作 |
+| --- | --- |
+| `GET /api/tenants/{tenantId}/me` | 所属していれば `200` と `{ id, name, permissions }`(そのテナントでの実効権限)、非所属は `403` |
+
+現在はデータモデルと認可基盤のみ実装している。運営者によるテナントの作成・所属の割り当て、テナントロールの編集、
+フロントエンドのテナント画面は未実装。テーブル追加のため、既存の環境ではマイグレーション `AddMultiTenancy` を
+`dotnet ef database update --project backend` で適用する。
+
 ## 確認
 
 ```sh

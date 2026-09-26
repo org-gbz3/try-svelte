@@ -32,6 +32,7 @@ public static class PermissionActionSync
             if (existing.TryGetValue(attribute.Key, out var action))
             {
                 action.DisplayName = attribute.DisplayName;
+                action.Scope = attribute.Scope;
                 action.DiscoveredAt = now;
             }
             else
@@ -41,6 +42,7 @@ public static class PermissionActionSync
                     Id = Guid.NewGuid(),
                     ActionKey = attribute.Key,
                     DisplayName = attribute.DisplayName,
+                    Scope = attribute.Scope,
                     DiscoveredAt = now
                 });
             }

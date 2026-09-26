@@ -6,5 +6,7 @@ public class PermissionAction
     public Guid Id { get; set; }
     public required string ActionKey { get; set; }
     public required string DisplayName { get; set; }
+    // システムロールとテナントロールのどちらで設定・判定するか。コード上の [PermissionKey] から同期する。
+    public PermissionScope Scope { get; set; }
     public DateTimeOffset DiscoveredAt { get; set; }
 }
