@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dev Container では OTLP の送信先が環境変数で設定されているため、テストでは OpenTelemetry を無効にする(backend/Program.cs 参照)。 -->
+<RunSettings>
+  <RunConfiguration>
+    <EnvironmentVariables>
+      <OTEL_SDK_DISABLED>true</OTEL_SDK_DISABLED>
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>

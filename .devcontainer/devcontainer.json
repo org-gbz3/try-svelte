@@ -2,7 +2,7 @@
   "name": "${localWorkspaceFolderBasename}",
   "dockerComposeFile": "compose.yaml",
   "service": "app",
-  "runServices": ["app", "sqlserver"],
+  "runServices": ["app", "sqlserver", "otel-dashboard"],
   "workspaceFolder": "/workspaces/try-svelte",
   "shutdownAction": "stopCompose",
   "features": {

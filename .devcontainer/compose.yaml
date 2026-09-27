@@ -8,6 +8,10 @@ services:
     volumes:
       - ..:/workspaces/try-svelte:cached
     command: sleep infinity
+    # バックエンドのログ・トレースを otel-dashboard へ送る。未設定の環境では送信しない(backend/Program.cs 参照)。
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-dashboard:18889
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     # Codex のサンドボックスが namespace を作成できるようにする。
     security_opt:
       - seccomp:unconfined
@@ -34,6 +38,18 @@ services:
       timeout: 10s
       retries: 30
       start_period: 30s
+
+  # 開発用の OpenTelemetry 受信・表示(トレースとログのドリルダウン)。保持はメモリのみで、再起動すると消える。
+  # 選定の経緯は decisions/0012 を参照。app の depends_on には入れず、停止していてもアプリ開発は継続できるようにする。
+  otel-dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:13.5.2
+    environment:
+      # 画面はホストのループバックにのみ公開する開発用途のため、起動ごとにブラウザートークンを探す手間を省いて匿名で開けるようにする。
+      # OTLP 受信口もホストへ公開せず compose ネットワーク内だけで使うため、同じく認証なしとする。
+      ASPIRE_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
+    # 画面(18888)のみホストのループバックに公開する。OTLP(gRPC 18889)は app から otel-dashboard:18889 で送る。
+    ports:
+      - "127.0.0.1:${OTEL_DASHBOARD_PORT:-18888}:18888"
 
 volumes:
   sqlserver-data:
