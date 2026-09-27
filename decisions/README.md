@@ -56,3 +56,4 @@
 | [0009](0009-codeql-build-mode-none.md) | CodeQL の build-mode を none に統一する | 採用 |
 | [0010](0010-multi-tenancy-design.md) | マルチテナント対応の構成 | 採用(一部置換: [0011](0011-tenant-default-admin-role-grants.md)) |
 | [0011](0011-tenant-default-admin-role-grants.md) | テナント既定ロールへの権限キーの自動付与 | 採用 |
+| [0012](0012-otel-dev-dashboard.md) | 開発環境の OpenTelemetry 受信・表示に .NET Aspire Dashboard を使う | 採用 |

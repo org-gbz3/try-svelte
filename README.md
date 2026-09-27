@@ -13,7 +13,8 @@ SvelteKit(SPA)をビルドして `backend/wwwroot` に配備し、ASP.NET Core(.
 
 ## Dev Container
 
-Docker Compose で開発用の `app` と SQL Server 2025 Developer の `sqlserver` を同時起動する。
+Docker Compose で開発用の `app`、SQL Server 2025 Developer の `sqlserver`、OpenTelemetry のログ・トレースを表示する
+`otel-dashboard`(.NET Aspire Dashboard)を同時起動する。
 SQL Server のヘルスチェックが成功してから開発用コンテナを起動する。
 Docker ホストは x86-64 Linux が対象で、SQL Server 用に最低 2 GB のメモリが必要。
 Developer エディションは開発・テスト用として使用する。
@@ -32,6 +33,30 @@ VS Code から開発コンテナを終了すると、Compose のサービスも�
 
 Codex のサンドボックスで namespace を作成できるよう、`app` に
 `security_opt: [seccomp:unconfined]` を指定している。この開発用コンテナ全体の seccomp 制限が解除される。
+
+### ログ・トレース・メトリクスの確認(OpenTelemetry)
+
+Dev Container 内でバックエンドを起動すると、ログ・トレース・メトリクスが OTLP で `otel-dashboard` に送られる。
+ホストのブラウザーで `http://localhost:18888`(ポートは `OTEL_DASHBOARD_PORT`)を開き、Traces でリクエストごとの
+ASP.NET Core・HttpClient・SQL のスパンを確認できる。トレースの詳細から、同じトレースの構造化ログ(Structured logs)へ移動できる。
+Metrics では以下の Meter の値をグラフで確認できる。
+
+| Meter | 主な内容 |
+| --- | --- |
+| `Microsoft.AspNetCore.Hosting`・`Microsoft.AspNetCore.Server.Kestrel` など | HTTP リクエストの処理時間・件数(ルート・ステータスコード別)、接続数 |
+| `Microsoft.AspNetCore.Authentication`・`Microsoft.AspNetCore.Authorization` | 認証・サインインの件数、認可の成否 |
+| `Microsoft.AspNetCore.Identity` | ユーザー作成・更新、パスワード確認、サインインなどの件数と処理時間 |
+| `System.Net.Http` | HttpClient による外部送信の処理時間・件数 |
+| `OpenTelemetry.Instrumentation.SqlClient` | SQL の処理時間 |
+| `System.Runtime` | GC・ヒープ・スレッドプール・CPU などのランタイム情報 |
+
+- 保持はメモリのみで、`otel-dashboard` コンテナの停止・再作成で消える。件数の上限を超えると古いものから破棄される。
+- 画面はホストのループバックにのみ公開し、開発用途のため認証なしで開ける。OTLP の受信口(gRPC 18889)はホストに公開しない。
+- 送信先は `app` サービスの環境変数 `OTEL_EXPORTER_OTLP_ENDPOINT` で指定する。未設定の環境(本番・CI・Dev Container 外)や
+  `OTEL_SDK_DISABLED=true` の場合は OpenTelemetry を登録しない。`dotnet test` は `backend.Tests/test.runsettings` で無効にしている。
+- リクエスト・レスポンスの本文と SQL のパラメーター値は記録しない。Development では SMTP 送信失敗の詳細ログに
+  メールアドレスなどが含まれる場合があるため、ダッシュボードの画面を共有するときは伏せる。
+- 選定の経緯は [decisions/0012-otel-dev-dashboard.md](decisions/0012-otel-dev-dashboard.md) を参照する。
 
 ### SQL Server への接続
 
@@ -375,8 +400,11 @@ dotnet publish backend -c Release
 # マイグレーション適用
 dotnet ef database update --project backend
 
-# ワンライナーで起動
+# ワンライナーで起動（OTEL の環境変数は compose.yaml で設定済み）
 npm --prefix frontend run build && dotnet run --project backend
+
+# ワンライナーで起動（OTEL 有効）
+(export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-dashboard:18889; npm --prefix frontend run build && dotnet run --project backend)
 ```
 
 `dotnet test backend.Tests` は、各テストの確認内容を日本語の表示名で、成否・所要時間とともに出力する。

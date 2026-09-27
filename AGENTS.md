@@ -45,6 +45,7 @@
 - EF Core のマイグレーションは `backend/Data/Migrations` に管理し、アプリ起動時の自動適用は行わない。
 - 本番の認証・CSRF Cookie の Secure 設定と HTTPS 配信を維持する。Data Protection の鍵は永続化し、複数インスタンスでは共有する構成にする。
 - 通常の `dotnet build` / `dotnet run` はフロントエンドをビルドしない。配備確認には通常の `dotnet publish backend -c Release` を使用し、`--no-build` で再生成を省略しない。
+- OpenTelemetry の送信先は環境変数 `OTEL_EXPORTER_OTLP_ENDPOINT` で指定し、設定ファイルに書かない。未設定または `OTEL_SDK_DISABLED=true` の環境では登録しない。リクエスト本文・SQL パラメーター値など、パスワードやトークンを含みうる値を記録する設定を追加しない。
 - CSP は `frontend/vite.config.ts` で管理し、アプリのスタイルには CSS クラスを使う。SvelteKit 更新で `svelte-announcer` のインラインスタイルが変わった場合は、実際の内容に合わせて許可ハッシュを更新する。
 
 ## テナントに属するデータ・APIを追加するとき

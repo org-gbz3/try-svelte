@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsTestProject>true</IsTestProject>
     <IsPackable>false</IsPackable>
+    <!-- テスト実行時の環境変数(OpenTelemetry の無効化)を設定する。 -->
+    <RunSettingsFilePath>$(MSBuildProjectDirectory)/test.runsettings</RunSettingsFilePath>
     <!-- 通常実行でも成功したテストの確認内容を表示する。 -->
     <VSTestLogger Condition="'$(VSTestLogger)' == ''">console%3Bverbosity=normal</VSTestLogger>
   </PropertyGroup>

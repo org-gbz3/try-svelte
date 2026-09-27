@@ -15,14 +15,18 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.19.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.19.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.19.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.SqlClient" Version="1.19.0" />
   </ItemGroup>
 
   <!--
     静的ファイルの収集前に SPA を生成し、ハッシュ付きファイル名を確定させる。
     NoBuild=true では既存のビルド成果物を使用する。
   -->
-  <Target Name="BuildFrontend" BeforeTargets="ResolveProjectStaticWebAssets"
-          Condition="'$(_IsPublishing)' == 'true' and '$(NoBuild)' != 'true' and '$(DesignTimeBuild)' != 'true'">
+  <Target Name="BuildFrontend" BeforeTargets="ResolveProjectStaticWebAssets" Condition="'$(_IsPublishing)' == 'true' and '$(NoBuild)' != 'true' and '$(DesignTimeBuild)' != 'true'">
     <Exec Command="npm ci" WorkingDirectory="../frontend" />
     <Exec Command="npm run build" WorkingDirectory="../frontend" />
 
