@@ -74,6 +74,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options, TenantContex
         {
             entity.Property(role => role.Name).HasMaxLength(256);
             entity.HasIndex(role => new { role.TenantId, role.Name }).IsUnique();
+            // 既定ロールはテナントごとに1つだけ。
+            entity.HasIndex(role => role.TenantId).IsUnique().HasFilter("[IsDefaultAdmin] = 1");
             // TenantMemberRole から (TenantId, Id) で参照し、別テナントのロール割り当てをDB制約で防ぐ。
             entity.HasAlternateKey(role => new { role.TenantId, role.Id });
             entity.HasOne<Tenant>()

@@ -7,7 +7,9 @@
 
 `ITenantOwned` を実装したエンティティ(現在は `TenantRoles`・`TenantMemberRoles`)には、URLのテナント以外の行を返さないクエリフィルターを適用する。
 
-テナントの作成・所属・テナントロールの割り当ては運営者が行う([admin-tenants.md](admin-tenants.md))。テナント内でのテナントロールの編集画面と、テナント画面(`/t/{tenantId}`)は未実装。
+テナントの作成・所属の追加と解除は運営者が行う([admin-tenants.md](admin-tenants.md))。テナント内では、`Tenant.Roles` でテナントロールを、`Tenant.MemberRoles` でメンバーへの割り当てを管理する。
+
+既定ロール「テナント管理者」(`IsDefaultAdmin`)は全テナント用権限キーへの `Write` を常に持ち、後から追加された権限キーも起動時に補完される。削除・権限変更はできない([decisions/0011](../../decisions/0011-tenant-default-admin-role-grants.md))。
 
 ## ER図
 
@@ -35,6 +37,7 @@ erDiagram
         guid Id PK
         guid TenantId FK "(TenantId, Name) で一意"
         string Name
+        bool IsDefaultAdmin "既定ロール。テナントごとに最大1つ"
     }
     TenantMemberRoles {
         guid TenantId PK "複合主キー"
@@ -56,4 +59,14 @@ erDiagram
 
 | 画面 | 操作 | API | CRUD | 対象テーブル |
 |---|---|---|---|---|
-| (未実装) | テナントでの自分の実効権限の取得 | `GET /api/tenants/{tenantId}/me` | Read | `Tenants`, `TenantMemberships`, `TenantMemberRoles`, `TenantRolePermissions`, `PermissionActions` |
+| `/`(トップ画面) | 所属テナント一覧の表示 | `GET /api/auth/me`・`POST /api/auth/login` | Read | `TenantMemberships`, `Tenants` |
+| `t/{tenantId}/` | テナントでの自分の実効権限の取得 | `GET /api/tenants/{tenantId}/me` | Read | `Tenants`, `TenantMemberships`, `TenantMemberRoles`, `TenantRolePermissions`, `PermissionActions` |
+| `t/{tenantId}/settings/roles/` | テナントロール一覧・権限マトリクスの表示 | `GET /api/tenants/{tenantId}/roles` | Read | `TenantRoles`, `TenantRolePermissions`, `PermissionActions` |
+| `t/{tenantId}/settings/roles/` | テナント用権限キー一覧の表示 | `GET /api/tenants/{tenantId}/roles/permission-actions` | Read | `PermissionActions` |
+| `t/{tenantId}/settings/roles/`(新規ロール名フォーム) | テナントロール作成 | `POST /api/tenants/{tenantId}/roles` | Create | `TenantRoles` |
+| `t/{tenantId}/settings/roles/`(「名称を変更」) | テナントロール名変更 | `PUT /api/tenants/{tenantId}/roles/{roleId}` | Update | `TenantRoles` |
+| `t/{tenantId}/settings/roles/`(「ロールを削除」) | テナントロール削除(既定ロールは不可) | `DELETE /api/tenants/{tenantId}/roles/{roleId}` | Delete | `TenantMemberRoles`(明示削除)、`TenantRoles`(`TenantRolePermissions` はカスケード削除) |
+| `t/{tenantId}/settings/roles/`(「権限を保存」) | テナントロールの権限を設定(全置換、既定ロールは不可) | `PUT /api/tenants/{tenantId}/roles/{roleId}/permissions` | Delete + Create | `TenantRolePermissions` |
+| `t/{tenantId}/settings/members/` | ロール名一覧・メンバーの表示 | `GET /api/tenants/{tenantId}/members` | Read | `TenantRoles`, `TenantMemberships`, `TenantMemberRoles`, `AspNetUsers` |
+| `t/{tenantId}/settings/members/`(「ロールを保存」) | メンバーのテナントロールを設定(全置換) | `PUT /api/tenants/{tenantId}/members/{userId}/roles` | Delete + Create | `TenantMemberRoles` |
+| (画面なし、起動時) | 既定ロールへの全テナント用権限の補完 | `PermissionActionSync` | Create + Update | `TenantRolePermissions` |

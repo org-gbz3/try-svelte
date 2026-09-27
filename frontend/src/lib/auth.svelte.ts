@@ -2,7 +2,8 @@
 export const PermissionLevel = { None: 0, Read: 1, Write: 2 } as const;
 export type PermissionLevel = (typeof PermissionLevel)[keyof typeof PermissionLevel];
 
-type User = { id: string; email: string; permissions: Record<string, PermissionLevel> };
+export type TenantSummary = { id: string; name: string };
+type User = { id: string; email: string; permissions: Record<string, PermissionLevel>; tenants: TenantSummary[] };
 type AuthStatus = 'checking' | 'authenticated' | 'anonymous' | 'error';
 
 let user = $state<User | null>(null);

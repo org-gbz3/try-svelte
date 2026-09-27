@@ -6,7 +6,7 @@
 招待は行わず、登録済みユーザーをメールアドレスで直接所属させる([decisions/0010](../../decisions/0010-multi-tenancy-design.md))。
 テナント・所属・テナントロールのテーブル構成は [tenants.md](tenants.md) を参照する。
 
-- テナント作成時に、既定ロール「テナント管理者」を同じ `SaveChanges` で作成し、その時点の全テナント用権限キー(`PermissionActions.Scope` が `Tenant`)への `Write` を付与する。後から追加された権限キーは既存の既定ロールへ自動では付与しない。
+- テナント作成時に、既定ロール「テナント管理者」(`TenantRoles.IsDefaultAdmin`)を同じ `SaveChanges` で作成し、全テナント用権限キー(`PermissionActions.Scope` が `Tenant`)への `Write` を付与する。後から追加された権限キーは起動時の `PermissionActionSync` が全テナントの既定ロールへ補完する([decisions/0011](../../decisions/0011-tenant-default-admin-role-grants.md))。
 - 個別テナントのAPIもルートに `{tenantId}` を含むため、テナント文脈が設定され、クエリフィルターと保存時の検証がそのテナントに限定して働く。
 
 ## ER図

@@ -185,7 +185,7 @@ Data Protection の鍵を保持しないと再起動後に既存リンクが無�
 | `GET /api/auth/passkeys`(要ログイン) | 登録済みパスキーの一覧を取得 |
 | `DELETE /api/auth/passkeys/{credentialId}`(要ログイン) | パスキーを削除。存在しないIDでも冪等に `204` |
 | `POST /api/auth/passkeys/login-options` | `{ email }` でログイン用オプションを取得 |
-| `POST /api/auth/passkeys/login` | `{ credentialJson }` で認証。成功 `200` と `{ id, email, permissions }`、失敗 `401` |
+| `POST /api/auth/passkeys/login` | `{ credentialJson }` で認証。成功 `200` と `{ id, email, permissions, tenants }`、失敗 `401` |
 
 **既知のトレードオフ**: `login-options` はメールアドレス指定でオプションを要求する方式のため、応答の内容(許可される認証情報の有無)からアカウントの存在・パスキー登録有無が、ブラウザー側の挙動を通じて推測されうる。これはWebAuthnの仕様上の制約であり、`resend-confirmation`/`forgot-password` で徹底している「応答からアカウント状態を判別できないようにする」方針とは完全には一致しない。設計判断の詳細は [decisions/0007-passkey-authentication-design.md](decisions/0007-passkey-authentication-design.md) を参照する。
 
@@ -201,7 +201,7 @@ Data Protection の鍵を保持しないと再起動後に既存リンクが無�
 
 | API | 動作 |
 | --- | --- |
-| `POST /api/auth/login/verify-2fa`(ログイン継続) | `{ code }` で認証。成功 `200` と `{ id, email, permissions }`、失敗 `401` |
+| `POST /api/auth/login/verify-2fa`(ログイン継続) | `{ code }` で認証。成功 `200` と `{ id, email, permissions, tenants }`、失敗 `401` |
 | `POST /api/auth/login/verify-recovery-code`(ログイン継続) | `{ code }` で認証(使い捨て)。成功 `200`、失敗 `401` |
 | `GET /api/auth/mfa/status`(要ログイン) | `{ enabled, recoveryCodesRemaining }` を取得 |
 | `POST /api/auth/mfa/setup`(要ログイン) | 新しい秘密鍵を発行し `{ sharedKey, otpauthUri }` を返す。有効化済みは `400` |
@@ -227,12 +227,13 @@ ASP.NET Core Identity の Cookie 認証を使用する。登録後に確認メ�
 | `POST /api/auth/resend-confirmation` | `{ email }` で再送。未登録・確認済みも同じ `200` 応答 |
 | `POST /api/auth/forgot-password` | `{ email }` でパスワード再設定を依頼。登録有無に関わらず同じ `200` 応答 |
 | `POST /api/auth/reset-password` | `{ userId, token, newPassword }` で再設定。成功 `204`、無効・期限切れ・ポリシー違反 `400` |
-| `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email, permissions }`、MFA有効なら `200` と `{ requiresTwoFactor: true }`、認証失敗 `401` |
-| `GET /api/auth/me` | 認証済みなら `200` と `{ id, email, permissions }`、未認証なら `401` |
+| `POST /api/auth/login` | `{ email, password }` で認証。成功 `200` と `{ id, email, permissions, tenants }`、MFA有効なら `200` と `{ requiresTwoFactor: true }`、認証失敗 `401` |
+| `GET /api/auth/me` | 認証済みなら `200` と `{ id, email, permissions, tenants }`、未認証なら `401` |
 | `POST /api/auth/logout` | Cookie を削除し `204` |
 
 `permissions` は、ログイン中ユーザーが保持する全ロールの実効権限を `{ アクションキー: レベル }` の形で表したマップ
 (レベルは `PermissionLevel` の数値、None=0/Read=1/Write=2。権限を持たないアクションキーはキー自体を省略する)。
+`tenants` はログイン中ユーザーが所属するテナントの `[{ id, name }]`(名前順)で、トップ画面の所属テナント一覧に使う。
 フロントエンドはこれを使ってナビゲーションの表示を権限に応じて出し分けるが、あくまでUXのためであり、各APIの
 `[Authorize]`/`[RequirePermission]` による保護とは独立している。経緯は
 [decisions/0003-expose-effective-permissions-in-me.md](decisions/0003-expose-effective-permissions-in-me.md) を参照する。
@@ -328,8 +329,16 @@ TLS をリバースプロキシで終端する場合は、信頼するプロキ�
   テナント文脈がないクエリは0件になる。保存時は `TenantId` を対象テナントで補完し、別テナントの `TenantId` の保存・`TenantId` の変更は例外にする。
 
 テナントは運営者(`Admin.Tenants` 権限)が `/admin/tenants` で作成し、登録済みユーザーをメールアドレスで直接所属させる(招待なし)。
-テナント作成時に既定ロール「テナント管理者」を作成し、その時点の全テナント用権限キーへの `Write` を付与する。
+テナント作成時に既定ロール「テナント管理者」を作成する。既定ロールは全テナント用権限キーへの `Write` を常に持ち、
+後から追加された権限キーも起動時の同期で付与される。削除・権限変更はできない(改名は可能)。経緯は
+[decisions/0011-tenant-default-admin-role-grants.md](decisions/0011-tenant-default-admin-role-grants.md) を参照する。
 運営者はメンバーごとにテナントロールを割り当てられる。トップ画面には `Admin.Tenants` の `Read` 権限を持つ場合のみリンクを表示する。
+
+所属ユーザーはトップ画面の所属テナント一覧から `/t/{tenantId}` へ移動する。テナントのトップは `GET /api/tenants/{tenantId}/me` の
+権限に応じて、`/t/{tenantId}/settings/roles`(テナントロールの作成・名称変更・削除・権限マトリクス編集、`Tenant.Roles`)と
+`/t/{tenantId}/settings/members`(メンバーへのテナントロール割り当て、`Tenant.MemberRoles`)へのリンクを表示する。
+メンバーの追加・所属解除は運営者のみが行う。ロール編集画面は `/admin/roles` と共通のコンポーネント
+(`frontend/src/lib/components/RoleManager.svelte`)を使う。
 
 | API | 動作 |
 | --- | --- |
@@ -342,10 +351,17 @@ TLS をリバースプロキシで終端する場合は、信頼するプロキ�
 | `DELETE /api/admin/tenants/{tenantId}/members/{userId}` | 所属を解除(`Admin.Tenants` の `Write`) |
 | `PUT /api/admin/tenants/{tenantId}/members/{userId}/roles` | `{ roleIds: [...] }` でメンバーのテナントロールを置き換え。他テナントのロールは `400`(`Admin.Tenants` の `Write`) |
 | `GET /api/tenants/{tenantId}/me` | 所属していれば `200` と `{ id, name, permissions }`(そのテナントでの実効権限)、非所属は `403` |
+| `GET /api/tenants/{tenantId}/roles` | テナントロール一覧(`isDefaultAdmin`・権限付き)を取得(`Tenant.Roles` の `Read`) |
+| `GET /api/tenants/{tenantId}/roles/permission-actions` | テナント用の権限キーのカタログを取得(`Tenant.Roles` の `Read`) |
+| `POST /api/tenants/{tenantId}/roles` | `{ name }` でテナントロールを作成。同じテナント内の同名は `400`(`Tenant.Roles` の `Write`) |
+| `PUT /api/tenants/{tenantId}/roles/{roleId}` | テナントロール名を変更(`Tenant.Roles` の `Write`) |
+| `DELETE /api/tenants/{tenantId}/roles/{roleId}` | テナントロールを割り当てごと削除。既定ロールは `400`(`Tenant.Roles` の `Write`) |
+| `PUT /api/tenants/{tenantId}/roles/{roleId}/permissions` | テナントロールの権限を一括更新。既定ロール・システム用の権限キーは `400`(`Tenant.Roles` の `Write`) |
+| `GET /api/tenants/{tenantId}/members` | テナントロール名一覧とメンバー(割り当てロール付き)を取得(`Tenant.MemberRoles` の `Read`) |
+| `PUT /api/tenants/{tenantId}/members/{userId}/roles` | `{ roleIds: [...] }` でメンバーのテナントロールを置き換え(`Tenant.MemberRoles` の `Write`) |
 
-テナント内でのテナントロールの編集と、フロントエンドのテナント画面(`/t/{tenantId}`)は未実装。
 最初の管理者のブートストラップは `Admin.Tenants` を付与しないため、必要に応じて `/admin/roles` で管理者ロールに付与する。
-テーブル追加のため、既存の環境ではマイグレーション `AddMultiTenancy` を `dotnet ef database update --project backend` で適用する。
+既存の環境ではマイグレーション `AddMultiTenancy`・`AddTenantDefaultAdminRole` を `dotnet ef database update --project backend` で適用する。
 
 ## 確認
 

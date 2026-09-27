@@ -441,6 +441,196 @@ public class TenantTests
         Assert.Empty(detail!.Members);
     }
 
+    [Fact(DisplayName = "ログイン中ユーザー情報に所属テナントの一覧を含める")]
+    public async Task MeIncludesTenants()
+    {
+        using var factory = new TenantFactory();
+        using var client = factory.CreateClient();
+        var userId = await RegisterAndLogin(client, factory);
+        var tenantId = await factory.CreateTenantAsync("tenant-a");
+        await factory.CreateTenantAsync("tenant-b");
+        await factory.AddMemberAsync(tenantId, userId);
+
+        var me = await client.GetFromJsonAsync<AuthMeResponse>("/api/auth/me");
+        Assert.Equal([new TenantSummary(tenantId, "tenant-a")], me!.Tenants);
+    }
+
+    [Fact(DisplayName = "既定ロールを割り当てられたメンバーはテナントロールを作成できる")]
+    public async Task DefaultRoleMemberCanCreateTenantRole()
+    {
+        using var factory = new TenantFactory();
+        var (member, tenantId) = await CreateTenantWithAdminMemberAsync(factory);
+        using var _ = member;
+
+        using var response = await Post(member, $"/api/tenants/{tenantId}/roles", new { Name = "editors" });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var roles = await member.GetFromJsonAsync<List<TenantRoleDetailResponse>>($"/api/tenants/{tenantId}/roles");
+        Assert.Contains(roles!, role => role.Name == "editors" && !role.IsDefaultAdmin);
+    }
+
+    [Fact(DisplayName = "Tenant.Roles権限のないメンバーはテナントロール一覧を取得できない")]
+    public async Task TenantRolesRejectsMemberWithoutPermission()
+    {
+        using var factory = new TenantFactory();
+        using var client = factory.CreateClient();
+        var userId = await RegisterAndLogin(client, factory);
+        var tenantId = await factory.CreateTenantAsync("tenant-a");
+        await factory.AddMemberAsync(tenantId, userId);
+        using var response = await client.GetAsync($"/api/tenants/{tenantId}/roles");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "同じテナント内では同名のテナントロールを作成できない")]
+    public async Task CreateTenantRoleRejectsDuplicateName()
+    {
+        using var factory = new TenantFactory();
+        var (member, tenantId) = await CreateTenantWithAdminMemberAsync(factory);
+        using var _ = member;
+        using var first = await Post(member, $"/api/tenants/{tenantId}/roles", new { Name = "editors" });
+        first.EnsureSuccessStatusCode();
+
+        using var second = await Post(member, $"/api/tenants/{tenantId}/roles", new { Name = "editors" });
+        Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
+    }
+
+    [Fact(DisplayName = "テナントロールにテナント用の権限を設定できる")]
+    public async Task SetTenantRolePermissions()
+    {
+        using var factory = new TenantFactory();
+        var (member, tenantId) = await CreateTenantWithAdminMemberAsync(factory);
+        using var _ = member;
+        var roleId = await CreateTenantRoleViaApiAsync(member, tenantId, "viewers");
+
+        using var response = await Put(member, $"/api/tenants/{tenantId}/roles/{roleId}/permissions", new
+        {
+            Permissions = new[] { new { ActionKey = TenantProbeController.ActionKey, Level = PermissionLevel.Read } }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(PermissionLevel.Read, await factory.GetTenantRolePermissionAsync(roleId, TenantProbeController.ActionKey));
+    }
+
+    [Fact(DisplayName = "テナントロールにシステム用の権限キーを設定できない")]
+    public async Task TenantRoleRejectsSystemPermissionKey()
+    {
+        using var factory = new TenantFactory();
+        var (member, tenantId) = await CreateTenantWithAdminMemberAsync(factory);
+        using var _ = member;
+        var roleId = await CreateTenantRoleViaApiAsync(member, tenantId, "viewers");
+
+        using var response = await Put(member, $"/api/tenants/{tenantId}/roles/{roleId}/permissions", new
+        {
+            Permissions = new[] { new { ActionKey = "Admin.Roles", Level = PermissionLevel.Write } }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "既定のテナント管理者ロールは削除できない")]
+    public async Task DefaultRoleCannotBeDeleted()
+    {
+        using var factory = new TenantFactory();
+        var (member, tenantId) = await CreateTenantWithAdminMemberAsync(factory);
+        using var _ = member;
+        var defaultRoleId = await GetDefaultRoleIdAsync(member, tenantId);
+        using var response = await Delete(member, $"/api/tenants/{tenantId}/roles/{defaultRoleId}");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "既定のテナント管理者ロールの権限は変更できない")]
+    public async Task DefaultRolePermissionsCannotBeChanged()
+    {
+        using var factory = new TenantFactory();
+        var (member, tenantId) = await CreateTenantWithAdminMemberAsync(factory);
+        using var _ = member;
+        var defaultRoleId = await GetDefaultRoleIdAsync(member, tenantId);
+        using var response = await Put(member, $"/api/tenants/{tenantId}/roles/{defaultRoleId}/permissions", new
+        {
+            Permissions = Array.Empty<object>()
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "メンバーに割り当て済みのテナントロールも削除でき、その権限は失われる")]
+    public async Task DeleteAssignedTenantRole()
+    {
+        using var factory = new TenantFactory();
+        using var client = factory.CreateClient();
+        var userId = await RegisterAndLogin(client, factory);
+        var tenantId = await factory.CreateTenantAsync("tenant-a");
+        await factory.AddMemberAsync(tenantId, userId);
+        await factory.GrantTenantRoleAsync(tenantId, userId, "role-admin", "Tenant.Roles", PermissionLevel.Write);
+        var probeRoleId = await factory.GrantTenantRoleAsync(tenantId, userId, "viewer", TenantProbeController.ActionKey, PermissionLevel.Read);
+
+        using var response = await Delete(client, $"/api/tenants/{tenantId}/roles/{probeRoleId}");
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        using var probe = await client.GetAsync($"/api/tenants/{tenantId}/test-probe");
+        Assert.Equal(HttpStatusCode.Forbidden, probe.StatusCode);
+    }
+
+    [Fact(DisplayName = "他テナントのロールIDを指定した変更は見つからない扱いになる")]
+    public async Task RenameRejectsOtherTenantRole()
+    {
+        using var factory = new TenantFactory();
+        var (member, tenantId) = await CreateTenantWithAdminMemberAsync(factory);
+        using var _ = member;
+        var otherTenantId = await factory.CreateTenantAsync("tenant-other");
+        var otherRoleId = await factory.CreateTenantRoleAsync(otherTenantId, "editors");
+
+        using var response = await Put(member, $"/api/tenants/{tenantId}/roles/{otherRoleId}", new { Name = "renamed" });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact(DisplayName = "Tenant.MemberRoles権限を持つメンバーはメンバーにテナントロールを割り当てられる")]
+    public async Task TenantAdminCanAssignMemberRoles()
+    {
+        using var factory = new TenantFactory();
+        var (member, tenantId) = await CreateTenantWithAdminMemberAsync(factory);
+        using var _ = member;
+        var otherUserId = await factory.CreateOtherUserAsync("other@example.com");
+        await factory.AddMemberAsync(tenantId, otherUserId);
+        var roleId = await CreateTenantRoleViaApiAsync(member, tenantId, "viewers");
+
+        using var response = await Put(member, $"/api/tenants/{tenantId}/members/{otherUserId}/roles", new { RoleIds = new[] { roleId } });
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        var members = await member.GetFromJsonAsync<TenantMembersResponse>($"/api/tenants/{tenantId}/members");
+        Assert.Equal([roleId], members!.Members.Single(item => item.UserId == otherUserId).RoleIds);
+    }
+
+    [Fact(DisplayName = "起動時の同期で既存テナントの既定ロールに不足している権限を付与する")]
+    public async Task SyncGrantsMissingPermissionsToDefaultRoles()
+    {
+        using var factory = new TenantFactory();
+        var tenantId = await factory.CreateTenantAsync("tenant-a");
+        var defaultRoleId = await factory.CreateTenantRoleAsync(tenantId, "テナント管理者", isDefaultAdmin: true);
+
+        await PermissionActionSync.RunAsync(factory.Services);
+
+        Assert.Equal(PermissionLevel.Write, await factory.GetTenantRolePermissionAsync(defaultRoleId, "Tenant.Roles"));
+    }
+
+    // 運営者APIでテナントを作成し、既定ロールを割り当てたメンバーとしてログインしたクライアントを返す。
+    private static async Task<(HttpClient Member, Guid TenantId)> CreateTenantWithAdminMemberAsync(TenantFactory factory)
+    {
+        using var operatorClient = await CreateTenantAdminClientAsync(factory, PermissionLevel.Write);
+        var tenantId = await CreateTenantViaApiAsync(operatorClient, "tenant-a");
+        var member = factory.CreateClient();
+        var memberId = await RegisterAndLogin(member, factory);
+        await AddMemberWithDefaultRoleAsync(operatorClient, tenantId, await factory.GetEmailAsync(memberId), memberId);
+        return (member, tenantId);
+    }
+
+    private static async Task<Guid> CreateTenantRoleViaApiAsync(HttpClient client, Guid tenantId, string name)
+    {
+        using var response = await Post(client, $"/api/tenants/{tenantId}/roles", new { Name = name });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<CreatedTenantResponse>())!.Id;
+    }
+
+    private static async Task<Guid> GetDefaultRoleIdAsync(HttpClient client, Guid tenantId)
+    {
+        var roles = await client.GetFromJsonAsync<List<TenantRoleDetailResponse>>($"/api/tenants/{tenantId}/roles");
+        return roles!.Single(role => role.IsDefaultAdmin).Id;
+    }
+
     // Admin.Tenants の権限を持つ運営者としてログインしたクライアントを作る。
     private static async Task<HttpClient> CreateTenantAdminClientAsync(TenantFactory factory, PermissionLevel level)
     {
@@ -504,6 +694,10 @@ public class TenantTests
     private record TenantMeResponse(Guid Id, string Name, Dictionary<string, PermissionLevel> Permissions);
     private record PermissionActionResponse(string ActionKey, string DisplayName);
     private record CreatedTenantResponse(Guid Id);
+    private record TenantSummary(Guid Id, string Name);
+    private record AuthMeResponse(string Id, string Email, List<TenantSummary> Tenants);
+    private record TenantRoleDetailResponse(Guid Id, string Name, bool IsDefaultAdmin);
+    private record TenantMembersResponse(List<TenantRoleResponse> Roles, List<TenantMemberResponse> Members);
     private record TenantListItemResponse(Guid Id, string Name, DateTime CreatedAt, int MemberCount);
     private record TenantRoleResponse(Guid Id, string Name);
     private record TenantMemberResponse(string UserId, string Email, List<Guid> RoleIds);
@@ -572,11 +766,11 @@ public class TenantTests
             await db.SaveChangesAsync();
         }
 
-        public async Task<Guid> CreateTenantRoleAsync(Guid tenantId, string name)
+        public async Task<Guid> CreateTenantRoleAsync(Guid tenantId, string name, bool isDefaultAdmin = false)
         {
             using var scope = Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-            var role = new TenantRole { Id = Guid.NewGuid(), TenantId = tenantId, Name = name };
+            var role = new TenantRole { Id = Guid.NewGuid(), TenantId = tenantId, Name = name, IsDefaultAdmin = isDefaultAdmin };
             db.TenantRoles.Add(role);
             await db.SaveChangesAsync();
             return role.Id;

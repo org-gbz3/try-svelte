@@ -188,7 +188,7 @@ public class AuthController(UserManager<ApplicationUser> users,
 
         if (!result.Succeeded)
             return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
-        return Ok(new { id = user!.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
+        return Ok(await UserResponseAsync(user!));
     }
 
     [EnableRateLimiting("auth")]
@@ -203,7 +203,7 @@ public class AuthController(UserManager<ApplicationUser> users,
         var result = await signIn.TwoFactorAuthenticatorSignInAsync(code, isPersistent: false, rememberClient: false);
         if (!result.Succeeded)
             return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
-        return Ok(new { id = user.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
+        return Ok(await UserResponseAsync(user));
     }
 
     [EnableRateLimiting("auth")]
@@ -217,7 +217,7 @@ public class AuthController(UserManager<ApplicationUser> users,
         var result = await signIn.TwoFactorRecoveryCodeSignInAsync(request.Code.Trim());
         if (!result.Succeeded)
             return Unauthorized(new { message = "ログインできません。入力内容を確認するか、しばらく待って再試行してください。" });
-        return Ok(new { id = user.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
+        return Ok(await UserResponseAsync(user));
     }
 
     [EnableRateLimiting("auth")]
@@ -458,7 +458,7 @@ public class AuthController(UserManager<ApplicationUser> users,
         }
         var user = await users.GetUserAsync(User);
         if (user is null) return Unauthorized();
-        return Ok(new { id = user.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
+        return Ok(await UserResponseAsync(user));
     }
 
     private static string ToBase64Url(byte[] bytes) =>
@@ -481,8 +481,23 @@ public class AuthController(UserManager<ApplicationUser> users,
             await signIn.SignOutAsync();
             return Unauthorized();
         }
-        return Ok(new { id = user.Id, email = user.Email, permissions = await EffectivePermissionsAsync(user.Id) });
+        return Ok(await UserResponseAsync(user));
     }
+
+    // ログイン成功・/me で返す利用者情報。所属テナント一覧は、SPAがテナントの切り替え先を表示するために含める。
+    private async Task<object> UserResponseAsync(ApplicationUser user) => new
+    {
+        id = user.Id,
+        email = user.Email,
+        permissions = await EffectivePermissionsAsync(user.Id),
+        tenants = await (
+            from membership in db.TenantMemberships
+            where membership.UserId == user.Id
+            join tenant in db.Tenants on membership.TenantId equals tenant.Id
+            orderby tenant.Name
+            select new { id = tenant.Id, name = tenant.Name }
+        ).ToListAsync()
+    };
 
     // ログイン中ユーザーが保持する全ロールの実効権限(アクションキー→最大レベル)。
     // フロントエンドがナビ表示を権限で出し分けられるよう /login・/me の両方で返す(decisions/0003参照)。

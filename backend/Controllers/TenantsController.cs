@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using backend.Authorization;
 using backend.Data;
+using backend.Tenancy;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -17,7 +18,7 @@ namespace backend.Controllers;
 public class TenantsController(AuthDbContext db, UserManager<ApplicationUser> userManager) : ControllerBase
 {
     // テナント作成時に自動作成するロール。作成直後のテナントを管理できる人がいない状態を避けるため、
-    // その時点の全テナント用権限キーへの Write を付与する。
+    // 全テナント用権限キーへの Write を付与する(後から追加された権限キーは起動時の PermissionActionSync が補完する)。
     public const string DefaultAdminRoleName = "テナント管理者";
 
     [PermissionKey("Admin.Tenants", "テナント管理")]
@@ -43,7 +44,7 @@ public class TenantsController(AuthDbContext db, UserManager<ApplicationUser> us
         if (name.Length == 0) return BadRequest(new { message = "テナント名を入力してください。" });
 
         var created = new Tenant { Id = Guid.NewGuid(), Name = name, CreatedAt = DateTime.UtcNow };
-        var adminRole = new TenantRole { Id = Guid.NewGuid(), TenantId = created.Id, Name = DefaultAdminRoleName };
+        var adminRole = new TenantRole { Id = Guid.NewGuid(), TenantId = created.Id, Name = DefaultAdminRoleName, IsDefaultAdmin = true };
         db.Tenants.Add(created);
         db.TenantRoles.Add(adminRole);
         var tenantActionIds = await db.PermissionActions
@@ -76,22 +77,8 @@ public class TenantsController(AuthDbContext db, UserManager<ApplicationUser> us
             .OrderBy(role => role.Name)
             .Select(role => new TenantRoleResponse(role.Id, role.Name))
             .ToListAsync();
-        var memberRoles = await db.TenantMemberRoles.ToListAsync();
-        var members = await (
-            from membership in db.TenantMemberships
-            where membership.TenantId == tenantId
-            join user in db.Users on membership.UserId equals user.Id
-            orderby user.Email
-            select new { user.Id, user.Email }
-        ).ToListAsync();
-
-        return Ok(new TenantDetailResponse(
-            found.Id, found.Name, found.CreatedAt, roles,
-            members.Select(member => new TenantMemberResponse(
-                member.Id, member.Email!,
-                memberRoles.Where(memberRole => memberRole.UserId == member.Id)
-                    .Select(memberRole => memberRole.TenantRoleId)
-                    .ToList())).ToList()));
+        var members = await TenantMembers.ListAsync(db, tenantId);
+        return Ok(new TenantDetailResponse(found.Id, found.Name, found.CreatedAt, roles, members));
     }
 
     [PermissionKey("Admin.Tenants", "テナント管理")]
@@ -159,22 +146,12 @@ public class TenantsController(AuthDbContext db, UserManager<ApplicationUser> us
     [HttpPut("{tenantId:guid}/members/{userId}/roles")]
     public async Task<IActionResult> SetMemberRoles(Guid tenantId, string userId, SetMemberRolesRequest request)
     {
-        if (!await db.TenantMemberships.AnyAsync(item => item.TenantId == tenantId && item.UserId == userId))
-            return NotFound();
-
-        var requested = request.RoleIds.Distinct().ToList();
-        // クエリフィルターにより、このテナントのロールだけが対象になる。
-        var validCount = await db.TenantRoles.CountAsync(role => requested.Contains(role.Id));
-        if (validCount != requested.Count)
-            return BadRequest(new { message = "存在しないロールが含まれています。" });
-
-        // 全置き換え。削除と追加を1回の SaveChanges にまとめ、途中の状態を残さない。
-        var current = await db.TenantMemberRoles.Where(memberRole => memberRole.UserId == userId).ToListAsync();
-        db.TenantMemberRoles.RemoveRange(current.Where(memberRole => !requested.Contains(memberRole.TenantRoleId)));
-        foreach (var roleId in requested.Except(current.Select(memberRole => memberRole.TenantRoleId)))
-            db.TenantMemberRoles.Add(new TenantMemberRole { TenantId = tenantId, UserId = userId, TenantRoleId = roleId });
-        await db.SaveChangesAsync();
-        return NoContent();
+        return await TenantMembers.ReplaceRolesAsync(db, tenantId, userId, request.RoleIds) switch
+        {
+            TenantMembers.ReplaceRolesResult.MemberNotFound => NotFound(),
+            TenantMembers.ReplaceRolesResult.InvalidRole => BadRequest(new { message = "存在しないロールが含まれています。" }),
+            _ => NoContent()
+        };
     }
 
     public sealed record TenantRequest([Required, StringLength(256)] string Name);
@@ -187,9 +164,7 @@ public class TenantsController(AuthDbContext db, UserManager<ApplicationUser> us
 
     public sealed record TenantRoleResponse(Guid Id, string Name);
 
-    public sealed record TenantMemberResponse(string UserId, string Email, IReadOnlyList<Guid> RoleIds);
-
     public sealed record TenantDetailResponse(
         Guid Id, string Name, DateTime CreatedAt,
-        IReadOnlyList<TenantRoleResponse> Roles, IReadOnlyList<TenantMemberResponse> Members);
+        IReadOnlyList<TenantRoleResponse> Roles, IReadOnlyList<TenantMembers.Member> Members);
 }

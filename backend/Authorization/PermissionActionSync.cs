@@ -47,6 +47,51 @@ public static class PermissionActionSync
                 });
             }
         }
+
+        // 既存行は読み込み時に、新規行は Add 時に追跡済みのため、Local で全権限キーを参照できる。
+        await GrantAllTenantPermissionsToDefaultRolesAsync(db, db.PermissionActions.Local.ToList());
+
+        // 権限キーの同期と既定ロールへの付与を1回の SaveChanges にまとめ、途中の状態を残さない。
         await db.SaveChangesAsync();
+    }
+
+    // 既定ロール「テナント管理者」は全テナント用権限キーへの Write を常に持つ。新しい機能の権限キーが追加されても
+    // 既存テナントの管理者が操作できなくならないよう、不足・低下している権限をここで補完する(decisions/0011参照)。
+    private static async Task GrantAllTenantPermissionsToDefaultRolesAsync(
+        AuthDbContext db, IEnumerable<PermissionAction> actions)
+    {
+        var tenantActionIds = actions
+            .Where(action => action.Scope == PermissionScope.Tenant)
+            .Select(action => action.Id)
+            .ToList();
+        if (tenantActionIds.Count == 0) return;
+
+        // 起動時はテナント文脈がないため、全テナントの既定ロールを対象にフィルターを明示的に解除する。
+        var defaultRoleIds = await db.TenantRoles
+            .IgnoreQueryFilters([AuthDbContext.TenantFilter])
+            .Where(role => role.IsDefaultAdmin)
+            .Select(role => role.Id)
+            .ToListAsync();
+        if (defaultRoleIds.Count == 0) return;
+
+        var current = await db.TenantRolePermissions
+            .Where(permission => defaultRoleIds.Contains(permission.TenantRoleId))
+            .ToListAsync();
+        foreach (var roleId in defaultRoleIds)
+        {
+            foreach (var actionId in tenantActionIds)
+            {
+                var permission = current.SingleOrDefault(item => item.TenantRoleId == roleId && item.PermissionActionId == actionId);
+                if (permission is null)
+                    db.TenantRolePermissions.Add(new TenantRolePermission
+                    {
+                        TenantRoleId = roleId,
+                        PermissionActionId = actionId,
+                        Level = PermissionLevel.Write
+                    });
+                else
+                    permission.Level = PermissionLevel.Write;
+            }
+        }
     }
 }
