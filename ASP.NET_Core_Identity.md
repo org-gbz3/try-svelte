@@ -13,7 +13,7 @@ Identity はユーザー、パスワード、ロール、確認トークンな�
 | 公開登録・招待制・管理者作成のどれにするか | 公開登録なら登録画面を公開する。招待制なら招待の期限・対象者・使用済み判定が必要。管理者作成なら初期パスワード設定や初回ログインの案内が必要 | 公開登録 API を提供 |
 | メールアドレスとユーザー名を同じにするか | 同じならメールでログインできる。別ならメール変更でログイン名を変えずに済む | `UserName` と `Email` に同じ入力値を設定 |
 | 同じメールで複数アカウントを許可するか | 許可するとメールだけではログイン対象や再設定対象を特定できない場合がある | `RequireUniqueEmail = true` |
-| 組織ごとに別アカウントを作るか | 組織単位の重複許可や所属切り替えには、テナントを含む検索・一意性・認可の設計が必要 | テナント管理は未実装 |
+| 組織ごとに別アカウントを作るか | 組織単位の重複許可や所属切り替えには、テナントを含む検索・一意性・認可の設計が必要 | アカウントは全体で共通(メール一意)とし、1アカウントが複数テナントに所属する。テナントは運営者が作成し、登録済みユーザーをメールアドレスで直接所属させる(招待なし、`/admin/tenants`)。所属ユーザーはトップ画面の所属テナント一覧から `/t/{tenantId}` へ移動し、テナント内の権限に応じてテナントロールとメンバーへの割り当てを管理する。設計判断は [decisions/0010-multi-tenancy-design.md](decisions/0010-multi-tenancy-design.md) を参照 |
 | 表示名・プロフィールをどこに保存するか | `IdentityUser` の拡張か別テーブルかで、DB の関連とマイグレーションが変わる | 標準の `IdentityUser` を使用 |
 
 業務データとの関連には、変更され得るメールアドレスよりユーザー ID を使う方針を先に決めておく。メールの一意性を Identity の検証に任せるか、DB 制約でも保証するかも検討する。`RequireUniqueEmail` の指定だけでメール列に一意インデックスが追加されるわけではない。[Microsoft Learn: Identity モデルのカスタマイズ](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/customize-identity-model?view=aspnetcore-10.0)
@@ -85,7 +85,7 @@ Cookie 認証では、`SameSite` の設定だけに依存せず更新 API に CS
 | --- | --- | --- |
 | ログインだけで利用可能か | `[Authorize]` で認証済み利用者に限定する | `/api/auth/me` を保護。他の保護対象APIはロール・権限による判定に移行(下記) |
 | 管理者・一般利用者などのロール | 管理者専用操作にはロール等の認可条件が必要 | ロールベースの認可を実装。`[PermissionKey]`/`[RequirePermission]` でAPIアクション単位に権限キーと必要レベル(`Read`/`Write`)を宣言し、ロールごとの権限レベルを `RolePermissions` テーブルで管理する。詳細は [decisions/0001-role-based-authorization-design.md](decisions/0001-role-based-authorization-design.md) と [README.md の「認可(ロール・権限)」](README.md#認可ロール権限) を参照 |
-| 所有者や組織単位の権限 | 他人・別組織の ID を指定してもアクセスできないよう、対象データごとに確認する | 業務上の所有者・組織認可は今後の設計事項 |
+| 所有者や組織単位の権限 | 他人・別組織の ID を指定してもアクセスできないよう、対象データごとに確認する | テナント(組織)単位は、URLの `{tenantId}` への所属とテナントロールの権限をリクエストごとにDBで判定し、`ITenantOwned` のデータはクエリフィルターで他テナントの行を返さない。テナント内での所有者単位の認可は今後の設計事項 |
 | 権限変更の反映時期 | ログイン時点の権限を保持する設計なら、変更後の再評価やチケット更新が必要 | 権限情報をCookieに一切載せず、リクエストのたびにDBを参照して判定するため、ロール・権限の変更は既存のログインセッションに即時反映される |
 
 画面のボタンを隠すだけでは API を保護できない。ロール・ポリシーなどの条件をサーバーでも適用する。このアプリでは未認証を `401`、権限不足を `403` とし、SPA は両者を区別する。この振り分けは Cookie 認証イベント(`OnRedirectToLogin`/`OnRedirectToAccessDenied`)がロールベースの認可でもそのまま適用される。[Microsoft Learn: ロールによる認可](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/secure-net-microservices-web-applications/authorization-net-microservices-web-applications)

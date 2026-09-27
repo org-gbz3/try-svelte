@@ -29,11 +29,24 @@
 		<div class="card">
 			<h1>トップ画面</h1>
 			<p>{auth.user?.email} でログイン中です。</p>
+			{#if auth.user?.tenants?.length}
+				<nav class="tenants" aria-label="所属テナント">
+					<h2>所属テナント</h2>
+					<ul>
+						{#each auth.user.tenants as tenant (tenant.id)}
+							<li><a href={`/t/${tenant.id}`}>{tenant.name}</a></li>
+						{/each}
+					</ul>
+				</nav>
+			{/if}
 			{#if auth.hasPermission('Admin.Roles', PermissionLevel.Read)}
 				<a href="/admin/roles">ロール管理</a>
 			{/if}
 			{#if auth.hasPermission('Admin.Users', PermissionLevel.Read)}
 				<a href="/admin/users">ユーザー管理</a>
+			{/if}
+			{#if auth.hasPermission('Admin.Tenants', PermissionLevel.Read)}
+				<a href="/admin/tenants">テナント管理</a>
 			{/if}
 			<a href="/settings/passkeys">パスキーの管理</a>
 			<a href="/settings/mfa">二段階認証(MFA)の管理</a>
@@ -68,6 +81,19 @@
 
 	a {
 		color: var(--color-primary);
+	}
+
+	.tenants h2 {
+		margin: 0 0 var(--space-sm);
+		font-size: var(--font-size-h4);
+	}
+
+	.tenants ul {
+		margin: 0;
+		padding-left: var(--space-xl);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-xs);
 	}
 
 	button {

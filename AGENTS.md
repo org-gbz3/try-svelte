@@ -47,6 +47,11 @@
 - 通常の `dotnet build` / `dotnet run` はフロントエンドをビルドしない。配備確認には通常の `dotnet publish backend -c Release` を使用し、`--no-build` で再生成を省略しない。
 - CSP は `frontend/vite.config.ts` で管理し、アプリのスタイルには CSS クラスを使う。SvelteKit 更新で `svelte-announcer` のインラインスタイルが変わった場合は、実際の内容に合わせて許可ハッシュを更新する。
 
+## テナントに属するデータ・APIを追加するとき
+
+- テナントに属するエンティティは `backend/Tenancy/ITenantOwned.cs` を実装し、クエリフィルターと保存時の検証の対象にする。テナントを横断する処理だけ `IgnoreQueryFilters([AuthDbContext.TenantFilter])` を理由のコメント付きで使う。
+- テナント内の API は `/api/tenants/{tenantId:guid}` 配下に置き、`[RequireTenantPermission]` または `[RequireTenantMember]` を付ける。権限キーは `[PermissionKey(..., PermissionScope.Tenant)]` で宣言する。経緯は [decisions/0010](decisions/0010-multi-tenancy-design.md) を参照する。
+
 ## DBエンティティ・画面のCRUDを変更するとき
 
 - エンティティ(`backend/Data`)、コントローラーのCRUD操作、または対応するフロントエンド画面を変更した場合は、`docs/features/` の該当ファイル(ER図・画面操作とCRUD対応表)も同じ変更の中で更新する。

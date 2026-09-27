@@ -34,7 +34,7 @@ erDiagram
 
 `AspNetUserPasskeys` は ASP.NET Core Identity 組み込みのパスキー(WebAuthn)ストアが管理するテーブルで、カスタムエンティティは定義していない([decisions/0007](../../decisions/0007-passkey-authentication-design.md)参照)。`AspNetUserTokens` も同様にIdentity組み込みのテーブルで、TOTPの秘密鍵(`AuthenticatorKey`)とハッシュ化されたリカバリーコード(`RecoveryCodes`)を格納する。MFA用のカスタムエンティティ・マイグレーションは追加していない([decisions/0008](../../decisions/0008-totp-mfa-design.md)参照)。
 
-`GET /api/auth/login`・`GET /api/auth/me` が返す実効権限マップは `AspNetUserRoles`・`RolePermissions`・`PermissionActions` を横断して算出する(参照のみ、このドメインでは更新しない)。テーブルの詳細は [admin-roles](admin-roles.md)・[admin-user-roles](admin-user-roles.md) を参照。
+`GET /api/auth/login`・`GET /api/auth/me` が返す実効権限マップは `AspNetUserRoles`・`RolePermissions`・`PermissionActions` を横断して算出する(参照のみ、このドメインでは更新しない)。同じ応答の所属テナント一覧は `TenantMemberships`・`Tenants` を参照する([tenants.md](tenants.md))。テーブルの詳細は [admin-roles](admin-roles.md)・[admin-user-roles](admin-user-roles.md) を参照。
 
 ## 画面操作とCRUD対応
 

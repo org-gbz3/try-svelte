@@ -39,6 +39,7 @@ public class RolesController(RoleManager<IdentityRole> roleManager, AuthDbContex
     public async Task<IActionResult> PermissionActions()
     {
         var actions = await db.PermissionActions
+            .Where(action => action.Scope == PermissionScope.System)
             .OrderBy(action => action.ActionKey)
             .Select(action => new PermissionActionResponse(action.ActionKey, action.DisplayName))
             .ToListAsync();
@@ -88,7 +89,9 @@ public class RolesController(RoleManager<IdentityRole> roleManager, AuthDbContex
     {
         if (await roleManager.FindByIdAsync(roleId) is null) return NotFound();
 
+        // テナント用の権限キーはテナントロールでのみ設定させ、システムロールとの混在を防ぐ。
         var actionIds = await db.PermissionActions
+            .Where(action => action.Scope == PermissionScope.System)
             .ToDictionaryAsync(action => action.ActionKey, action => action.Id);
         if (request.Permissions.Any(entry => !actionIds.ContainsKey(entry.ActionKey)))
             return BadRequest(new { message = "存在しない権限キーが含まれています。" });
