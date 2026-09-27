@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using OpenTelemetry;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
@@ -23,7 +24,7 @@ builder.Services.AddControllersWithViews(options =>
 // 開発時に API の仕様を確認できるよう OpenAPI の生成機能を登録する。
 builder.Services.AddOpenApi();
 
-// OTLP の送信先(標準の環境変数 OTEL_EXPORTER_OTLP_ENDPOINT)が設定された環境でのみ、ログ・トレースを送る。
+// OTLP の送信先(標準の環境変数 OTEL_EXPORTER_OTLP_ENDPOINT)が設定された環境でのみ、ログ・トレース・メトリクスを送る。
 // 未設定の本番・CI では計装自体を登録せず、届かない送信先への送信や計装のオーバーヘッドを生じさせない(decisions/0012参照)。
 // 標準の OTEL_SDK_DISABLED=true でも無効にする。テストは送信先が設定された Dev Container 内でも実行されるが、
 // ホストの終了ごとに未送信データの送信を待つと1件あたり十数秒遅くなるため、runsettings でこの変数を設定している。
@@ -37,6 +38,18 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOIN
             .AddAspNetCoreInstrumentation()
             .AddHttpClientInstrumentation()
             .AddSqlClientInstrumentation())
+        // .NET 標準の Meter を購読する。ランタイム(System.Runtime)の Meter は .NET 9 以降に組み込まれているため、
+        // 別パッケージの OpenTelemetry.Instrumentation.Runtime は使わない。認証・認可・Identity の Meter は
+        // ログイン失敗や権限拒否の増加を把握するために購読する。いずれもメールアドレスなどの個人情報をタグに含まない。
+        .WithMetrics(metrics => metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddSqlClientInstrumentation()
+            .AddMeter(
+                "System.Runtime",
+                "Microsoft.AspNetCore.Authentication",
+                "Microsoft.AspNetCore.Authorization",
+                "Microsoft.AspNetCore.Identity"))
         // ログには実行中のトレースID・スパンIDが自動で付き、ダッシュボードでトレースからログへ移動できる。
         .WithLogging(configureBuilder: null, configureOptions: options =>
         {
